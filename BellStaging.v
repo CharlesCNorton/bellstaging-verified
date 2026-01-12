@@ -24,6 +24,400 @@ Require Import Lia.
 
 Import ListNotations.
 
+Module ClinicalParameters.
+
+Record ClinicalParam : Type := MkParam {
+  param_value : nat;
+  param_source : nat;
+  param_year : nat
+}.
+
+Definition bell_1978 : nat := 1.
+Definition walsh_kliegman_1986 : nat := 2.
+Definition neu_walker_2011 : nat := 3.
+Definition patel_2015 : nat := 4.
+Definition gephart_2012 : nat := 5.
+
+Definition extremely_preterm_threshold :=
+  MkParam 28 walsh_kliegman_1986 1986.
+
+Definition elbw_threshold :=
+  MkParam 1000 walsh_kliegman_1986 1986.
+
+Definition vlbw_threshold :=
+  MkParam 1500 walsh_kliegman_1986 1986.
+
+Definition thrombocytopenia_threshold :=
+  MkParam 150 walsh_kliegman_1986 1986.
+
+Definition severe_thrombocytopenia_threshold :=
+  MkParam 50 patel_2015 2015.
+
+Definition pneumatosis_pathognomonic :=
+  MkParam 1 bell_1978 1978.
+
+Definition portal_venous_gas_pathognomonic :=
+  MkParam 1 bell_1978 1978.
+
+Definition pneumoperitoneum_requires_surgery :=
+  MkParam 1 bell_1978 1978.
+
+Definition npo_duration_stage_I :=
+  MkParam 3 walsh_kliegman_1986 1986.
+
+Definition npo_duration_stage_II :=
+  MkParam 10 walsh_kliegman_1986 1986.
+
+Definition npo_duration_stage_III :=
+  MkParam 14 walsh_kliegman_1986 1986.
+
+Definition breast_milk_protective :=
+  MkParam 1 neu_walker_2011 2011.
+
+End ClinicalParameters.
+
+Module RiskFactors.
+
+Record t : Type := MkRiskFactors {
+  gestational_age_weeks : nat;
+  birth_weight_grams : nat;
+  formula_fed : bool;
+  history_of_perinatal_asphyxia : bool;
+  congenital_heart_disease : bool;
+  polycythemia : bool;
+  umbilical_catheter : bool;
+  exchange_transfusion : bool
+}.
+
+Definition extremely_preterm (r : t) : bool :=
+  gestational_age_weeks r <? 28.
+
+Definition very_preterm (r : t) : bool :=
+  (28 <=? gestational_age_weeks r) && (gestational_age_weeks r <? 32).
+
+Definition moderate_preterm (r : t) : bool :=
+  (32 <=? gestational_age_weeks r) && (gestational_age_weeks r <? 37).
+
+Definition term (r : t) : bool :=
+  37 <=? gestational_age_weeks r.
+
+Definition extremely_low_birth_weight (r : t) : bool :=
+  birth_weight_grams r <? 1000.
+
+Definition very_low_birth_weight (r : t) : bool :=
+  (1000 <=? birth_weight_grams r) && (birth_weight_grams r <? 1500).
+
+Definition low_birth_weight (r : t) : bool :=
+  (1500 <=? birth_weight_grams r) && (birth_weight_grams r <? 2500).
+
+Definition risk_score (r : t) : nat :=
+  (if extremely_preterm r then 4
+   else if very_preterm r then 3
+   else if moderate_preterm r then 2
+   else 0) +
+  (if extremely_low_birth_weight r then 4
+   else if very_low_birth_weight r then 3
+   else if low_birth_weight r then 1
+   else 0) +
+  (if formula_fed r then 1 else 0) +
+  (if history_of_perinatal_asphyxia r then 2 else 0) +
+  (if congenital_heart_disease r then 2 else 0) +
+  (if polycythemia r then 1 else 0) +
+  (if umbilical_catheter r then 1 else 0) +
+  (if exchange_transfusion r then 1 else 0).
+
+Definition high_risk (r : t) : bool :=
+  6 <=? risk_score r.
+
+Lemma extremely_preterm_high_risk : forall r,
+  extremely_preterm r = true ->
+  extremely_low_birth_weight r = true ->
+  high_risk r = true.
+Proof.
+  intros r Hp Hw. unfold high_risk, risk_score.
+  rewrite Hp, Hw. simpl.
+  reflexivity.
+Qed.
+
+End RiskFactors.
+
+Module LabValues.
+
+Record t : Type := MkLabValues {
+  wbc_k_per_uL : nat;
+  absolute_neutrophil_count : nat;
+  platelet_k_per_uL : nat;
+  crp_mg_L : nat;
+  procalcitonin_ng_mL_x10 : nat;
+  lactate_mmol_L_x10 : nat;
+  ph_x100 : nat;
+  base_deficit : nat;
+  pco2_mmHg : nat;
+  glucose_mg_dL : nat
+}.
+
+Definition leukopenia (l : t) : bool :=
+  wbc_k_per_uL l <? 5.
+
+Definition leukocytosis (l : t) : bool :=
+  25 <? wbc_k_per_uL l.
+
+Definition neutropenia (l : t) : bool :=
+  absolute_neutrophil_count l <? 1500.
+
+Definition thrombocytopenia (l : t) : bool :=
+  platelet_k_per_uL l <? 150.
+
+Definition severe_thrombocytopenia (l : t) : bool :=
+  platelet_k_per_uL l <? 50.
+
+Definition elevated_crp (l : t) : bool :=
+  10 <? crp_mg_L l.
+
+Definition elevated_procalcitonin (l : t) : bool :=
+  5 <? procalcitonin_ng_mL_x10 l.
+
+Definition elevated_lactate (l : t) : bool :=
+  20 <? lactate_mmol_L_x10 l.
+
+Definition metabolic_acidosis (l : t) : bool :=
+  (ph_x100 l <? 735) && (6 <? base_deficit l).
+
+Definition respiratory_acidosis (l : t) : bool :=
+  (ph_x100 l <? 735) && (45 <? pco2_mmHg l).
+
+Definition hypoglycemia (l : t) : bool :=
+  glucose_mg_dL l <? 45.
+
+Definition hyperglycemia (l : t) : bool :=
+  180 <? glucose_mg_dL l.
+
+Definition dic_likely (l : t) : bool :=
+  severe_thrombocytopenia l && elevated_lactate l.
+
+Definition sepsis_markers_elevated (l : t) : bool :=
+  elevated_crp l || elevated_procalcitonin l.
+
+Definition lab_severity_score (l : t) : nat :=
+  (if leukopenia l || leukocytosis l then 1 else 0) +
+  (if neutropenia l then 2 else 0) +
+  (if thrombocytopenia l then 1 else 0) +
+  (if severe_thrombocytopenia l then 2 else 0) +
+  (if elevated_crp l then 1 else 0) +
+  (if elevated_lactate l then 2 else 0) +
+  (if metabolic_acidosis l then 2 else 0) +
+  (if dic_likely l then 3 else 0).
+
+Lemma dic_requires_severe_thrombocytopenia : forall l,
+  dic_likely l = true -> severe_thrombocytopenia l = true.
+Proof.
+  intros l H. unfold dic_likely in H.
+  apply andb_true_iff in H. destruct H as [H1 _]. exact H1.
+Qed.
+
+End LabValues.
+
+Module Antibiotics.
+
+Inductive Agent : Type :=
+  | Ampicillin : Agent
+  | Gentamicin : Agent
+  | Metronidazole : Agent
+  | Vancomycin : Agent
+  | Cefotaxime : Agent
+  | Meropenem : Agent
+  | Piperacillin_Tazobactam : Agent.
+
+Inductive Regimen : Type :=
+  | Empiric_AmpGent : Regimen
+  | Empiric_AmpGentMetro : Regimen
+  | Broad_VancCefotaximeMetro : Regimen
+  | Broad_VancMeropenem : Regimen
+  | Broad_PipTazo : Regimen.
+
+Definition agents_in_regimen (r : Regimen) : list Agent :=
+  match r with
+  | Empiric_AmpGent => [Ampicillin; Gentamicin]
+  | Empiric_AmpGentMetro => [Ampicillin; Gentamicin; Metronidazole]
+  | Broad_VancCefotaximeMetro => [Vancomycin; Cefotaxime; Metronidazole]
+  | Broad_VancMeropenem => [Vancomycin; Meropenem]
+  | Broad_PipTazo => [Piperacillin_Tazobactam]
+  end.
+
+Definition has_anaerobic_coverage (r : Regimen) : bool :=
+  match r with
+  | Empiric_AmpGent => false
+  | Empiric_AmpGentMetro => true
+  | Broad_VancCefotaximeMetro => true
+  | Broad_VancMeropenem => true
+  | Broad_PipTazo => true
+  end.
+
+Definition has_gram_negative_coverage (r : Regimen) : bool :=
+  match r with
+  | Empiric_AmpGent => true
+  | Empiric_AmpGentMetro => true
+  | Broad_VancCefotaximeMetro => true
+  | Broad_VancMeropenem => true
+  | Broad_PipTazo => true
+  end.
+
+Definition recommended_regimen_by_stage (stage_nat : nat) : Regimen :=
+  match stage_nat with
+  | 1 | 2 => Empiric_AmpGent
+  | 3 | 4 => Empiric_AmpGentMetro
+  | _ => Broad_VancMeropenem
+  end.
+
+Definition duration_days (stage_nat : nat) : nat :=
+  match stage_nat with
+  | 1 | 2 => 3
+  | 3 | 4 => 10
+  | _ => 14
+  end.
+
+Lemma advanced_nec_has_anaerobic_coverage : forall n,
+  5 <= n ->
+  has_anaerobic_coverage (recommended_regimen_by_stage n) = true.
+Proof.
+  intros n H. unfold recommended_regimen_by_stage.
+  destruct n as [|[|[|[|[|n']]]]]; simpl; try lia; reflexivity.
+Qed.
+
+End Antibiotics.
+
+Module FeedingProtocol.
+
+Inductive FeedingStatus : Type :=
+  | NPO : FeedingStatus
+  | TrophicFeeds : FeedingStatus
+  | AdvancingFeeds : FeedingStatus
+  | FullFeeds : FeedingStatus.
+
+Inductive FeedType : Type :=
+  | BreastMilk : FeedType
+  | DonorMilk : FeedType
+  | Preterm_Formula : FeedType
+  | Elemental_Formula : FeedType.
+
+Record FeedingState : Type := MkFeedingState {
+  current_status : FeedingStatus;
+  current_feed_type : option FeedType;
+  days_npo : nat;
+  ml_per_kg_per_day : nat
+}.
+
+Definition npo_duration_by_stage (stage_nat : nat) : nat :=
+  match stage_nat with
+  | 1 | 2 => 3
+  | 3 | 4 => 7
+  | 5 => 14
+  | _ => 14
+  end.
+
+Definition can_restart_feeds (stage_nat : nat) (days_npo : nat)
+    (abdominal_exam_normal : bool) (no_bilious_residuals : bool) : bool :=
+  (npo_duration_by_stage stage_nat <=? days_npo) &&
+  abdominal_exam_normal && no_bilious_residuals.
+
+Definition trophic_feed_volume_ml_kg_day : nat := 20.
+Definition advancement_rate_ml_kg_day : nat := 20.
+Definition full_feed_volume_ml_kg_day : nat := 150.
+
+Definition preferred_feed_type_post_nec : FeedType := BreastMilk.
+
+Definition days_to_full_feeds (start_volume : nat) : nat :=
+  (full_feed_volume_ml_kg_day - start_volume) / advancement_rate_ml_kg_day.
+
+Lemma breast_milk_preferred :
+  preferred_feed_type_post_nec = BreastMilk.
+Proof. reflexivity. Qed.
+
+Lemma stage_IIIB_requires_14_days_npo :
+  npo_duration_by_stage 6 = 14.
+Proof. reflexivity. Qed.
+
+End FeedingProtocol.
+
+Module TemporalProgression.
+
+Inductive ClinicalTrajectory : Type :=
+  | Stable : ClinicalTrajectory
+  | Improving : ClinicalTrajectory
+  | Worsening : ClinicalTrajectory
+  | RapidDeterioration : ClinicalTrajectory.
+
+Inductive ManagementPhase : Type :=
+  | Recognition : ManagementPhase
+  | Stabilization : ManagementPhase
+  | ActiveTreatment : ManagementPhase
+  | SurgicalEvaluation : ManagementPhase
+  | PostOperative : ManagementPhase
+  | Recovery : ManagementPhase
+  | Resolved : ManagementPhase.
+
+Definition phase_to_nat (p : ManagementPhase) : nat :=
+  match p with
+  | Recognition => 1
+  | Stabilization => 2
+  | ActiveTreatment => 3
+  | SurgicalEvaluation => 4
+  | PostOperative => 5
+  | Recovery => 6
+  | Resolved => 7
+  end.
+
+Record TimePoint : Type := MkTimePoint {
+  hours_since_onset : nat;
+  current_phase : ManagementPhase;
+  trajectory : ClinicalTrajectory;
+  stage_at_timepoint : nat
+}.
+
+Definition valid_transition (from to : ManagementPhase) : bool :=
+  match from, to with
+  | Recognition, Stabilization => true
+  | Stabilization, ActiveTreatment => true
+  | ActiveTreatment, SurgicalEvaluation => true
+  | ActiveTreatment, Recovery => true
+  | SurgicalEvaluation, PostOperative => true
+  | SurgicalEvaluation, ActiveTreatment => true
+  | PostOperative, Recovery => true
+  | Recovery, Resolved => true
+  | p1, p2 => phase_to_nat p1 =? phase_to_nat p2
+  end.
+
+Definition deterioration_triggers_escalation (t : ClinicalTrajectory) : bool :=
+  match t with
+  | Worsening => true
+  | RapidDeterioration => true
+  | _ => false
+  end.
+
+Definition hours_to_reassess (phase : ManagementPhase) (traj : ClinicalTrajectory) : nat :=
+  match traj with
+  | RapidDeterioration => 2
+  | Worsening => 4
+  | Stable => 6
+  | Improving => 12
+  end.
+
+Lemma rapid_deterioration_frequent_reassess :
+  hours_to_reassess ActiveTreatment RapidDeterioration = 2.
+Proof. reflexivity. Qed.
+
+Lemma transition_recognition_to_stabilization :
+  valid_transition Recognition Stabilization = true.
+Proof. reflexivity. Qed.
+
+Definition is_terminal_phase (p : ManagementPhase) : bool :=
+  match p with
+  | Resolved => true
+  | _ => false
+  end.
+
+End TemporalProgression.
+
 Module Stage.
 
 Inductive t : Type :=
@@ -189,13 +583,41 @@ End RadiographicSigns.
 Module ClinicalState.
 
 Record t : Type := MkClinicalState {
+  risk_factors : RiskFactors.t;
+  labs : LabValues.t;
   systemic : SystemicSigns.t;
   intestinal : IntestinalSigns.t;
-  radiographic : RadiographicSigns.t
+  radiographic : RadiographicSigns.t;
+  hours_since_symptom_onset : nat
 }.
 
+Definition default_risk_factors : RiskFactors.t :=
+  RiskFactors.MkRiskFactors 40 3500 false false false false false false.
+
+Definition default_labs : LabValues.t :=
+  LabValues.MkLabValues 10 5000 200 5 2 15 740 0 40 80.
+
 Definition empty : t :=
-  MkClinicalState SystemicSigns.none IntestinalSigns.none RadiographicSigns.none.
+  MkClinicalState
+    default_risk_factors
+    default_labs
+    SystemicSigns.none
+    IntestinalSigns.none
+    RadiographicSigns.none
+    0.
+
+Definition is_high_risk_patient (c : t) : bool :=
+  RiskFactors.high_risk (risk_factors c).
+
+Definition has_lab_derangements (c : t) : bool :=
+  LabValues.sepsis_markers_elevated (labs c) ||
+  LabValues.thrombocytopenia (labs c) ||
+  LabValues.metabolic_acidosis (labs c).
+
+Definition overall_severity_score (c : t) : nat :=
+  RiskFactors.risk_score (risk_factors c) +
+  LabValues.lab_severity_score (labs c) +
+  SystemicSigns.severity_score (systemic c).
 
 End ClinicalState.
 
@@ -317,6 +739,12 @@ End SurgicalIndications.
 
 Module WitnessExamples.
 
+Definition preterm_risk_factors : RiskFactors.t :=
+  RiskFactors.MkRiskFactors 26 800 true false false false true false.
+
+Definition abnormal_labs : LabValues.t :=
+  LabValues.MkLabValues 3 1000 80 25 8 35 720 10 42 60.
+
 Definition stage_IIA_witness_systemic : SystemicSigns.t :=
   SystemicSigns.MkSystemicSigns true true false true false false false false false false.
 
@@ -328,12 +756,19 @@ Definition stage_IIA_witness_radiographic : RadiographicSigns.t :=
 
 Definition stage_IIA_witness : ClinicalState.t :=
   ClinicalState.MkClinicalState
+    preterm_risk_factors
+    abnormal_labs
     stage_IIA_witness_systemic
     stage_IIA_witness_intestinal
-    stage_IIA_witness_radiographic.
+    stage_IIA_witness_radiographic
+    12.
 
 Lemma stage_IIA_witness_classifies_correctly :
   Classification.classify stage_IIA_witness = Stage.IIA.
+Proof. reflexivity. Qed.
+
+Lemma stage_IIA_witness_is_high_risk :
+  ClinicalState.is_high_risk_patient stage_IIA_witness = true.
 Proof. reflexivity. Qed.
 
 Definition stage_IIIB_witness_radiographic : RadiographicSigns.t :=
@@ -341,9 +776,12 @@ Definition stage_IIIB_witness_radiographic : RadiographicSigns.t :=
 
 Definition stage_IIIB_witness : ClinicalState.t :=
   ClinicalState.MkClinicalState
+    preterm_risk_factors
+    abnormal_labs
     SystemicSigns.none
     IntestinalSigns.none
-    stage_IIIB_witness_radiographic.
+    stage_IIIB_witness_radiographic
+    48.
 
 Lemma stage_IIIB_witness_classifies_correctly :
   Classification.classify stage_IIIB_witness = Stage.IIIB.
@@ -370,13 +808,29 @@ Proof. reflexivity. Qed.
 
 Definition systemic_only : ClinicalState.t :=
   ClinicalState.MkClinicalState
+    ClinicalState.default_risk_factors
+    ClinicalState.default_labs
     (SystemicSigns.MkSystemicSigns true true true true true true true true true true)
     IntestinalSigns.none
-    RadiographicSigns.none.
+    RadiographicSigns.none
+    24.
 
 Lemma systemic_signs_alone_insufficient_for_definite_nec :
   Stage.to_nat (Classification.classify systemic_only) < Stage.to_nat Stage.IIA.
 Proof. simpl. lia. Qed.
+
+Definition term_infant_low_risk : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    (RiskFactors.MkRiskFactors 40 3500 false false false false false false)
+    ClinicalState.default_labs
+    SystemicSigns.none
+    IntestinalSigns.none
+    RadiographicSigns.none
+    0.
+
+Lemma term_infant_not_high_risk :
+  ClinicalState.is_high_risk_patient term_infant_low_risk = false.
+Proof. reflexivity. Qed.
 
 End CounterexampleAttempts.
 
@@ -460,3 +914,138 @@ Lemma stage_nat_determines_category : forall s,
 Proof. intros []; reflexivity. Qed.
 
 End StageProgression.
+
+Module Prognosis.
+
+Inductive Outcome : Type :=
+  | FullRecovery : Outcome
+  | Stricture : Outcome
+  | ShortBowelSyndrome : Outcome
+  | Recurrence : Outcome
+  | Death : Outcome.
+
+Definition mortality_risk_percent (s : Stage.t) : nat :=
+  match s with
+  | Stage.IA => 0
+  | Stage.IB => 0
+  | Stage.IIA => 5
+  | Stage.IIB => 10
+  | Stage.IIIA => 20
+  | Stage.IIIB => 30
+  end.
+
+Definition stricture_risk_percent (s : Stage.t) : nat :=
+  match s with
+  | Stage.IA => 0
+  | Stage.IB => 0
+  | Stage.IIA => 10
+  | Stage.IIB => 20
+  | Stage.IIIA => 25
+  | Stage.IIIB => 35
+  end.
+
+Definition short_bowel_risk_percent (s : Stage.t) : nat :=
+  match s with
+  | Stage.IA => 0
+  | Stage.IB => 0
+  | Stage.IIA => 0
+  | Stage.IIB => 5
+  | Stage.IIIA => 10
+  | Stage.IIIB => 25
+  end.
+
+Definition requires_long_term_followup (s : Stage.t) : bool :=
+  match s with
+  | Stage.IA | Stage.IB => false
+  | _ => true
+  end.
+
+Definition neurodevelopmental_risk_elevated (s : Stage.t) (required_surgery : bool) : bool :=
+  match s with
+  | Stage.IIIA | Stage.IIIB => true
+  | Stage.IIA | Stage.IIB => required_surgery
+  | _ => false
+  end.
+
+Lemma stage_IIIB_highest_mortality :
+  forall s, mortality_risk_percent s <= mortality_risk_percent Stage.IIIB.
+Proof. intros []; simpl; lia. Qed.
+
+Lemma suspected_nec_no_mortality :
+  forall s, StageProgression.is_suspected s = true -> mortality_risk_percent s = 0.
+Proof. intros []; simpl; intro H; try discriminate; reflexivity. Qed.
+
+Lemma definite_nec_requires_followup :
+  forall s, StageProgression.is_definite s = true -> requires_long_term_followup s = true.
+Proof. intros []; simpl; intro H; try discriminate; reflexivity. Qed.
+
+End Prognosis.
+
+Module BellCriteria.
+
+Record StageCriteria : Type := MkCriteria {
+  crit_stage : Stage.t;
+  crit_requires_systemic : bool;
+  crit_systemic_level : nat;
+  crit_requires_intestinal : bool;
+  crit_intestinal_level : nat;
+  crit_requires_radiographic : bool;
+  crit_radiographic_level : nat
+}.
+
+Definition stage_IA_criteria :=
+  MkCriteria Stage.IA true 1 true 1 false 0.
+
+Definition stage_IB_criteria :=
+  MkCriteria Stage.IB true 1 true 1 false 0.
+
+Definition stage_IIA_criteria :=
+  MkCriteria Stage.IIA true 1 true 2 true 2.
+
+Definition stage_IIB_criteria :=
+  MkCriteria Stage.IIB true 2 true 2 true 2.
+
+Definition stage_IIIA_criteria :=
+  MkCriteria Stage.IIIA true 3 true 3 true 2.
+
+Definition stage_IIIB_criteria :=
+  MkCriteria Stage.IIIB true 3 true 3 true 3.
+
+Definition compute_systemic_level (s : SystemicSigns.t) : nat :=
+  if SystemicSigns.stage3_signs s then 3
+  else if SystemicSigns.stage2b_signs s then 2
+  else if SystemicSigns.stage1_signs s then 1
+  else 0.
+
+Definition compute_intestinal_level (i : IntestinalSigns.t) : nat :=
+  if IntestinalSigns.stage3_signs i then 3
+  else if IntestinalSigns.stage2b_signs i || IntestinalSigns.stage2_signs i then 2
+  else if IntestinalSigns.stage1b_signs i then 1
+  else if IntestinalSigns.stage1a_signs i then 1
+  else 0.
+
+Definition compute_radiographic_level (r : RadiographicSigns.t) : nat :=
+  if RadiographicSigns.pneumoperitoneum r then 3
+  else if RadiographicSigns.stage2b_findings r then 2
+  else if RadiographicSigns.definite_nec_findings r then 2
+  else if RadiographicSigns.stage2a_findings r then 2
+  else if RadiographicSigns.stage1_findings r then 1
+  else 0.
+
+Definition meets_criteria (c : ClinicalState.t) (crit : StageCriteria) : bool :=
+  let sys_lv := compute_systemic_level (ClinicalState.systemic c) in
+  let int_lv := compute_intestinal_level (ClinicalState.intestinal c) in
+  let rad_lv := compute_radiographic_level (ClinicalState.radiographic c) in
+  (negb (crit_requires_systemic crit) || (crit_systemic_level crit <=? sys_lv)) &&
+  (negb (crit_requires_intestinal crit) || (crit_intestinal_level crit <=? int_lv)) &&
+  (negb (crit_requires_radiographic crit) || (crit_radiographic_level crit <=? rad_lv)).
+
+Definition classify_declarative (c : ClinicalState.t) : Stage.t :=
+  if meets_criteria c stage_IIIB_criteria then Stage.IIIB
+  else if meets_criteria c stage_IIIA_criteria then Stage.IIIA
+  else if meets_criteria c stage_IIB_criteria then Stage.IIB
+  else if meets_criteria c stage_IIA_criteria then Stage.IIA
+  else if meets_criteria c stage_IB_criteria then Stage.IB
+  else Stage.IA.
+
+End BellCriteria.
