@@ -217,6 +217,93 @@ Qed.
 
 End LabValues.
 
+Module CoagulationPanel.
+
+Record t : Type := MkCoagPanel {
+  pt_seconds_x10 : nat;
+  inr_x100 : nat;
+  fibrinogen_mg_dL : nat;
+  ionized_calcium_x100 : nat
+}.
+
+Definition pt_prolonged (c : t) : bool :=
+  150 <? pt_seconds_x10 c.
+
+Definition inr_elevated (c : t) : bool :=
+  150 <? inr_x100 c.
+
+Definition hypofibrinogenemia (c : t) : bool :=
+  fibrinogen_mg_dL c <? 100.
+
+Definition hypocalcemia (c : t) : bool :=
+  ionized_calcium_x100 c <? 100.
+
+Definition coagulopathy_present (c : t) : bool :=
+  pt_prolonged c || inr_elevated c || hypofibrinogenemia c.
+
+Definition dic_criteria_met (c : t) (platelets_low : bool) (elevated_lactate : bool) : bool :=
+  platelets_low && coagulopathy_present c && elevated_lactate.
+
+Definition calcium_replacement_needed (c : t) (prbc_units : nat) : bool :=
+  hypocalcemia c || (4 <=? prbc_units).
+
+Lemma coagulopathy_implies_one_abnormal : forall c,
+  coagulopathy_present c = true ->
+  pt_prolonged c = true \/ inr_elevated c = true \/ hypofibrinogenemia c = true.
+Proof.
+  intros c H. unfold coagulopathy_present in H.
+  apply orb_true_iff in H. destruct H as [H | H].
+  - apply orb_true_iff in H. destruct H as [H | H].
+    + left. exact H.
+    + right. left. exact H.
+  - right. right. exact H.
+Qed.
+
+End CoagulationPanel.
+
+Module DifferentialDiagnosis.
+
+Inductive GIDifferential : Type :=
+  | NEC : GIDifferential
+  | SpontaneousIntestinalPerforation : GIDifferential
+  | Sepsis : GIDifferential
+  | Volvulus : GIDifferential
+  | HirschsprungDisease : GIDifferential
+  | MeconiumIleus : GIDifferential
+  | IntestinalAtresia : GIDifferential
+  | FeedingIntolerance : GIDifferential.
+
+Definition suggests_nec (has_pneumatosis : bool) (has_portal_venous_gas : bool)
+    (has_preceding_feeding_intolerance : bool) : bool :=
+  has_pneumatosis || has_portal_venous_gas || has_preceding_feeding_intolerance.
+
+Definition suggests_sip (has_perforation : bool) (no_pneumatosis : bool)
+    (no_preceding_symptoms : bool) (extremely_preterm : bool) : bool :=
+  has_perforation && no_pneumatosis && no_preceding_symptoms && extremely_preterm.
+
+Definition suggests_volvulus (bilious_emesis : bool) (sudden_distension : bool)
+    (bloody_stool : bool) : bool :=
+  bilious_emesis && sudden_distension.
+
+Definition suggests_sepsis (positive_blood_culture : bool) (no_abdominal_findings : bool) : bool :=
+  positive_blood_culture && no_abdominal_findings.
+
+Definition most_likely_diagnosis
+    (has_pneumatosis : bool) (has_perforation : bool)
+    (no_preceding_symptoms : bool) (extremely_preterm : bool)
+    (bilious_emesis : bool) : GIDifferential :=
+  if has_pneumatosis then NEC
+  else if has_perforation && no_preceding_symptoms && extremely_preterm
+       then SpontaneousIntestinalPerforation
+  else if bilious_emesis then Volvulus
+  else FeedingIntolerance.
+
+Lemma pneumatosis_implies_nec : forall perf no_prec ext bil,
+  most_likely_diagnosis true perf no_prec ext bil = NEC.
+Proof. intros. reflexivity. Qed.
+
+End DifferentialDiagnosis.
+
 Module Antibiotics.
 
 Inductive Agent : Type :=
@@ -354,7 +441,8 @@ Inductive ManagementPhase : Type :=
   | SurgicalEvaluation : ManagementPhase
   | PostOperative : ManagementPhase
   | Recovery : ManagementPhase
-  | Resolved : ManagementPhase.
+  | Resolved : ManagementPhase
+  | Death : ManagementPhase.
 
 Definition phase_to_nat (p : ManagementPhase) : nat :=
   match p with
@@ -365,6 +453,7 @@ Definition phase_to_nat (p : ManagementPhase) : nat :=
   | PostOperative => 5
   | Recovery => 6
   | Resolved => 7
+  | Death => 8
   end.
 
 Record TimePoint : Type := MkTimePoint {
@@ -380,9 +469,12 @@ Definition valid_transition (from to : ManagementPhase) : bool :=
   | Stabilization, ActiveTreatment => true
   | ActiveTreatment, SurgicalEvaluation => true
   | ActiveTreatment, Recovery => true
+  | ActiveTreatment, Death => true
   | SurgicalEvaluation, PostOperative => true
   | SurgicalEvaluation, ActiveTreatment => true
+  | SurgicalEvaluation, Death => true
   | PostOperative, Recovery => true
+  | PostOperative, Death => true
   | Recovery, Resolved => true
   | p1, p2 => phase_to_nat p1 =? phase_to_nat p2
   end.
@@ -413,6 +505,7 @@ Proof. reflexivity. Qed.
 Definition is_terminal_phase (p : ManagementPhase) : bool :=
   match p with
   | Resolved => true
+  | Death => true
   | _ => false
   end.
 
@@ -816,6 +909,49 @@ Qed.
 
 End SurgicalIndications.
 
+Module SurgicalProcedures.
+
+Inductive Procedure : Type :=
+  | PrimaryPeritonealDrainage : Procedure
+  | ExploratoryLaparotomy : Procedure
+  | BowelResectionPrimaryAnastomosis : Procedure
+  | BowelResectionStoma : Procedure
+  | SecondLookLaparotomy : Procedure
+  | StomaReversal : Procedure.
+
+Inductive Urgency : Type :=
+  | Emergent : Urgency
+  | Urgent : Urgency
+  | Elective : Urgency.
+
+Definition procedure_urgency (p : Procedure) : Urgency :=
+  match p with
+  | PrimaryPeritonealDrainage => Emergent
+  | ExploratoryLaparotomy => Emergent
+  | BowelResectionPrimaryAnastomosis => Urgent
+  | BowelResectionStoma => Urgent
+  | SecondLookLaparotomy => Urgent
+  | StomaReversal => Elective
+  end.
+
+Definition initial_procedure_for_perforation (birth_weight_grams : nat) : Procedure :=
+  if birth_weight_grams <? 1000 then PrimaryPeritonealDrainage
+  else ExploratoryLaparotomy.
+
+Definition requires_stoma (extent_of_necrosis_percent : nat) : bool :=
+  50 <? extent_of_necrosis_percent.
+
+Lemma elbw_gets_drain : forall bw,
+  bw < 1000 -> initial_procedure_for_perforation bw = PrimaryPeritonealDrainage.
+Proof.
+  intros bw H. unfold initial_procedure_for_perforation.
+  destruct (bw <? 1000) eqn:E.
+  - reflexivity.
+  - apply Nat.ltb_ge in E. lia.
+Qed.
+
+End SurgicalProcedures.
+
 Module WitnessExamples.
 
 Definition preterm_risk_factors : RiskFactors.t :=
@@ -993,6 +1129,30 @@ Lemma term_infant_not_high_risk :
   ClinicalState.is_high_risk_patient term_infant_low_risk = false.
 Proof. reflexivity. Qed.
 
+Lemma empty_state_diagnoses_not_nec :
+  Classification.diagnose ClinicalState.empty = Diagnosis.NotNEC.
+Proof. reflexivity. Qed.
+
+Definition isolated_perforation_radiographic : RadiographicSigns.t :=
+  RadiographicSigns.MkRadiographicSigns false false false false false false true.
+
+Definition isolated_perforation : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    (RiskFactors.MkRiskFactors 25 700 false false false false false false)
+    ClinicalState.default_labs
+    SystemicSigns.none
+    IntestinalSigns.none
+    isolated_perforation_radiographic
+    2.
+
+Lemma isolated_perforation_is_sip :
+  Classification.diagnose isolated_perforation = Diagnosis.SuspectedSIP.
+Proof. reflexivity. Qed.
+
+Lemma isolated_perforation_stages_IIIB :
+  Classification.classify isolated_perforation = Stage.IIIB.
+Proof. reflexivity. Qed.
+
 End CounterexampleAttempts.
 
 Module SafetyProperties.
@@ -1027,6 +1187,24 @@ Theorem surgery_only_at_IIIB : forall s,
   Treatment.requires_surgery (Treatment.of_stage s) = true -> s = Stage.IIIB.
 Proof.
   intros s H. destruct s; simpl in H; try discriminate. reflexivity.
+Qed.
+
+Theorem pneumoperitoneum_maximal : forall c,
+  RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = true ->
+  forall s, Stage.to_nat s <= Stage.to_nat (Classification.classify c).
+Proof.
+  intros c Hperf s.
+  rewrite (Classification.pneumoperitoneum_forces_IIIB c Hperf).
+  destruct s; simpl; lia.
+Qed.
+
+Theorem stage_order_reflects_severity : forall s1 s2,
+  Stage.to_nat s1 < Stage.to_nat s2 ->
+  Treatment.npo_duration_days (Treatment.of_stage s1) <=
+  Treatment.npo_duration_days (Treatment.of_stage s2).
+Proof.
+  intros s1 s2 H.
+  destruct s1; destruct s2; simpl in *; try lia.
 Qed.
 
 End SafetyProperties.
@@ -1139,6 +1317,22 @@ Proof. intros []; simpl; intro H; try discriminate; reflexivity. Qed.
 Lemma definite_nec_requires_followup :
   forall s, StageProgression.is_definite s = true -> requires_long_term_followup s = true.
 Proof. intros []; simpl; intro H; try discriminate; reflexivity. Qed.
+
+Lemma higher_stage_worse_mortality : forall s1 s2,
+  Stage.leb s1 s2 = true ->
+  mortality_risk_percent s1 <= mortality_risk_percent s2.
+Proof.
+  intros s1 s2 H.
+  destruct s1; destruct s2; simpl in *; try lia; try discriminate.
+Qed.
+
+Lemma higher_stage_worse_stricture : forall s1 s2,
+  Stage.leb s1 s2 = true ->
+  stricture_risk_percent s1 <= stricture_risk_percent s2.
+Proof.
+  intros s1 s2 H.
+  destruct s1; destruct s2; simpl in *; try lia; try discriminate.
+Qed.
 
 End Prognosis.
 
