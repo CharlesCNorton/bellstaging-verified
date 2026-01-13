@@ -452,6 +452,49 @@ Proof. intros []; simpl; lia. Qed.
 
 End Stage.
 
+Module Diagnosis.
+
+Inductive t : Type :=
+  | NotNEC : t
+  | SuspectedSIP : t
+  | SuspectedNEC : Stage.t -> t
+  | ConfirmedNEC : Stage.t -> t.
+
+Definition is_nec (d : t) : bool :=
+  match d with
+  | SuspectedNEC _ | ConfirmedNEC _ => true
+  | _ => false
+  end.
+
+Definition is_sip (d : t) : bool :=
+  match d with
+  | SuspectedSIP => true
+  | _ => false
+  end.
+
+Definition stage_of (d : t) : option Stage.t :=
+  match d with
+  | NotNEC => None
+  | SuspectedSIP => None
+  | SuspectedNEC s => Some s
+  | ConfirmedNEC s => Some s
+  end.
+
+Definition is_confirmed (d : t) : bool :=
+  match d with
+  | ConfirmedNEC _ => true
+  | _ => false
+  end.
+
+Definition requires_surgery (d : t) : bool :=
+  match d with
+  | SuspectedSIP => true
+  | ConfirmedNEC Stage.IIIB => true
+  | _ => false
+  end.
+
+End Diagnosis.
+
 Module SystemicSigns.
 
 Record t : Type := MkSystemicSigns {
@@ -491,7 +534,7 @@ Definition severity_score (s : t) : nat :=
   (if dic s then 3 else 0) +
   (if neutropenia s then 3 else 0).
 
-Lemma severity_score_max : forall s, severity_score s <= 22.
+Lemma severity_score_max : forall s, severity_score s <= 20.
 Proof.
   intros s. unfold severity_score.
   destruct (temperature_instability s); destruct (apnea s);
@@ -569,10 +612,7 @@ Definition stage3b_findings (r : t) : bool :=
   pneumoperitoneum r.
 
 Definition definite_nec_findings (r : t) : bool :=
-  pneumatosis_intestinalis r || portal_venous_gas r.
-
-Definition perforation_finding (r : t) : bool :=
-  pneumoperitoneum r.
+  pneumatosis_intestinalis r.
 
 Lemma pneumoperitoneum_implies_stage3b : forall r,
   pneumoperitoneum r = true -> stage3b_findings r = true.
@@ -623,24 +663,57 @@ End ClinicalState.
 
 Module Classification.
 
-Definition classify (c : ClinicalState.t) : Stage.t :=
+Definition has_any_findings (c : ClinicalState.t) : bool :=
+  let sys := ClinicalState.systemic c in
+  let int := ClinicalState.intestinal c in
+  let rad := ClinicalState.radiographic c in
+  SystemicSigns.stage1_signs sys ||
+  IntestinalSigns.stage1a_signs int ||
+  IntestinalSigns.stage1b_signs int ||
+  RadiographicSigns.definite_nec_findings rad ||
+  RadiographicSigns.stage2b_findings rad ||
+  RadiographicSigns.pneumoperitoneum rad.
+
+Definition classify_stage (c : ClinicalState.t) : Stage.t :=
   let sys := ClinicalState.systemic c in
   let int := ClinicalState.intestinal c in
   let rad := ClinicalState.radiographic c in
   if RadiographicSigns.pneumoperitoneum rad then Stage.IIIB
-  else if SystemicSigns.stage3_signs sys && IntestinalSigns.stage3_signs int then Stage.IIIA
-  else if SystemicSigns.stage2b_signs sys && RadiographicSigns.stage2b_findings rad then Stage.IIB
-  else if IntestinalSigns.stage2b_signs int && RadiographicSigns.stage2b_findings rad then Stage.IIB
+  else if SystemicSigns.stage3_signs sys && IntestinalSigns.stage3_signs int && RadiographicSigns.stage2b_findings rad then Stage.IIIA
+  else if SystemicSigns.stage2b_signs sys && IntestinalSigns.stage2_signs int && RadiographicSigns.stage2b_findings rad then Stage.IIB
+  else if IntestinalSigns.stage2b_signs int && IntestinalSigns.stage2_signs int && RadiographicSigns.stage2b_findings rad then Stage.IIB
   else if RadiographicSigns.definite_nec_findings rad && IntestinalSigns.stage2_signs int then Stage.IIA
   else if IntestinalSigns.stage1b_signs int && SystemicSigns.stage1_signs sys then Stage.IB
-  else if IntestinalSigns.stage1a_signs int && SystemicSigns.stage1_signs sys then Stage.IA
   else Stage.IA.
+
+Definition has_nec_evidence_before_perforation (c : ClinicalState.t) : bool :=
+  let rad := ClinicalState.radiographic c in
+  let int := ClinicalState.intestinal c in
+  RadiographicSigns.pneumatosis_intestinalis rad ||
+  RadiographicSigns.portal_venous_gas rad ||
+  IntestinalSigns.stage2_signs int ||
+  IntestinalSigns.stage3_signs int.
+
+Definition diagnose (c : ClinicalState.t) : Diagnosis.t :=
+  let rad := ClinicalState.radiographic c in
+  if negb (has_any_findings c) then Diagnosis.NotNEC
+  else if RadiographicSigns.pneumoperitoneum rad && negb (has_nec_evidence_before_perforation c)
+       then Diagnosis.SuspectedSIP
+  else
+    let stage := classify_stage c in
+    match stage with
+    | Stage.IA | Stage.IB => Diagnosis.SuspectedNEC stage
+    | _ => Diagnosis.ConfirmedNEC stage
+    end.
+
+Definition classify (c : ClinicalState.t) : Stage.t :=
+  classify_stage c.
 
 Lemma pneumoperitoneum_forces_IIIB : forall c,
   RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = true ->
   classify c = Stage.IIIB.
 Proof.
-  intros c H. unfold classify. rewrite H. reflexivity.
+  intros c H. unfold classify, classify_stage. rewrite H. reflexivity.
 Qed.
 
 Lemma classify_always_valid : forall c,
@@ -649,6 +722,12 @@ Proof.
   intros c. split.
   - destruct (classify c); simpl; lia.
   - destruct (classify c); simpl; lia.
+Qed.
+
+Lemma no_findings_diagnoses_not_nec : forall c,
+  has_any_findings c = false -> diagnose c = Diagnosis.NotNEC.
+Proof.
+  intros c H. unfold diagnose. rewrite H. reflexivity.
 Qed.
 
 End Classification.
@@ -789,6 +868,88 @@ Proof. reflexivity. Qed.
 
 Lemma stage_IIIB_witness_requires_surgery :
   Treatment.requires_surgery (Treatment.of_stage (Classification.classify stage_IIIB_witness)) = true.
+Proof. reflexivity. Qed.
+
+Definition stage_IA_witness_systemic : SystemicSigns.t :=
+  SystemicSigns.MkSystemicSigns true false false true false false false false false false.
+
+Definition stage_IA_witness_intestinal : IntestinalSigns.t :=
+  IntestinalSigns.MkIntestinalSigns true true true false false false false false false false.
+
+Definition stage_IA_witness : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    preterm_risk_factors
+    ClinicalState.default_labs
+    stage_IA_witness_systemic
+    stage_IA_witness_intestinal
+    RadiographicSigns.none
+    4.
+
+Lemma stage_IA_witness_classifies_correctly :
+  Classification.classify stage_IA_witness = Stage.IA.
+Proof. reflexivity. Qed.
+
+Definition stage_IB_witness_systemic : SystemicSigns.t :=
+  SystemicSigns.MkSystemicSigns true false true false false false false false false false.
+
+Definition stage_IB_witness_intestinal : IntestinalSigns.t :=
+  IntestinalSigns.MkIntestinalSigns false false false true false false false false false false.
+
+Definition stage_IB_witness : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    preterm_risk_factors
+    ClinicalState.default_labs
+    stage_IB_witness_systemic
+    stage_IB_witness_intestinal
+    RadiographicSigns.none
+    6.
+
+Lemma stage_IB_witness_classifies_correctly :
+  Classification.classify stage_IB_witness = Stage.IB.
+Proof. reflexivity. Qed.
+
+Definition stage_IIB_witness_systemic : SystemicSigns.t :=
+  SystemicSigns.MkSystemicSigns true true false true true true false false false false.
+
+Definition stage_IIB_witness_intestinal : IntestinalSigns.t :=
+  IntestinalSigns.MkIntestinalSigns false true false false true true true false false false.
+
+Definition stage_IIB_witness_radiographic : RadiographicSigns.t :=
+  RadiographicSigns.MkRadiographicSigns false true false false true true false.
+
+Definition stage_IIB_witness : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    preterm_risk_factors
+    abnormal_labs
+    stage_IIB_witness_systemic
+    stage_IIB_witness_intestinal
+    stage_IIB_witness_radiographic
+    24.
+
+Lemma stage_IIB_witness_classifies_correctly :
+  Classification.classify stage_IIB_witness = Stage.IIB.
+Proof. reflexivity. Qed.
+
+Definition stage_IIIA_witness_systemic : SystemicSigns.t :=
+  SystemicSigns.MkSystemicSigns true true true true true true true true false false.
+
+Definition stage_IIIA_witness_intestinal : IntestinalSigns.t :=
+  IntestinalSigns.MkIntestinalSigns false true false false true true false false true true.
+
+Definition stage_IIIA_witness_radiographic : RadiographicSigns.t :=
+  RadiographicSigns.MkRadiographicSigns false true false true true true false.
+
+Definition stage_IIIA_witness : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    preterm_risk_factors
+    abnormal_labs
+    stage_IIIA_witness_systemic
+    stage_IIIA_witness_intestinal
+    stage_IIIA_witness_radiographic
+    36.
+
+Lemma stage_IIIA_witness_classifies_correctly :
+  Classification.classify stage_IIIA_witness = Stage.IIIA.
 Proof. reflexivity. Qed.
 
 End WitnessExamples.
