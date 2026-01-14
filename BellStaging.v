@@ -19,6 +19,7 @@
 Require Import Coq.Arith.Arith.
 Require Import Coq.Bool.Bool.
 Require Import Coq.Lists.List.
+Require Import Coq.ZArith.ZArith.
 Require Import Lia.
 
 Import ListNotations.
@@ -758,12 +759,41 @@ End FeedingProtocol.
 
 Module TemporalProgression.
 
+(* Clinical trajectory represents the direction of change *)
 Inductive ClinicalTrajectory : Type :=
   | Stable : ClinicalTrajectory
   | Improving : ClinicalTrajectory
   | Worsening : ClinicalTrajectory
   | RapidDeterioration : ClinicalTrajectory.
 
+(* Trajectory severity for comparisons *)
+Definition trajectory_severity (t : ClinicalTrajectory) : nat :=
+  match t with
+  | Improving => 0
+  | Stable => 1
+  | Worsening => 2
+  | RapidDeterioration => 3
+  end.
+
+Definition trajectory_leb (t1 t2 : ClinicalTrajectory) : bool :=
+  trajectory_severity t1 <=? trajectory_severity t2.
+
+(* Rate of change categories *)
+Inductive ChangeRate : Type :=
+  | NoChange : ChangeRate
+  | SlowChange : ChangeRate
+  | ModerateChange : ChangeRate
+  | RapidChange : ChangeRate.
+
+Definition rate_to_nat (r : ChangeRate) : nat :=
+  match r with
+  | NoChange => 0
+  | SlowChange => 1
+  | ModerateChange => 2
+  | RapidChange => 3
+  end.
+
+(* Management phases in clinical course *)
 Inductive ManagementPhase : Type :=
   | Recognition : ManagementPhase
   | Stabilization : ManagementPhase
@@ -786,12 +816,46 @@ Definition phase_to_nat (p : ManagementPhase) : nat :=
   | Death => 8
   end.
 
+(* Time point captures state at a moment *)
 Record TimePoint : Type := MkTimePoint {
   hours_since_onset : nat;
   current_phase : ManagementPhase;
   trajectory : ClinicalTrajectory;
   stage_at_timepoint : nat
 }.
+
+(* Temporal delta between two time points *)
+Record TemporalDelta : Type := MkTemporalDelta {
+  delta_hours : nat;
+  stage_change : Z;            (* positive = worsening, negative = improving *)
+  phase_changed : bool;
+  trajectory_at_delta : ClinicalTrajectory
+}.
+
+(* Compute delta between two time points *)
+Definition compute_delta (earlier later : TimePoint) : TemporalDelta :=
+  MkTemporalDelta
+    (hours_since_onset later - hours_since_onset earlier)
+    (Z.of_nat (stage_at_timepoint later) - Z.of_nat (stage_at_timepoint earlier))
+    (negb (phase_to_nat (current_phase earlier) =? phase_to_nat (current_phase later)))
+    (trajectory later).
+
+(* Determine trajectory from stage change and time *)
+Definition infer_trajectory (stage_delta : Z) (hours : nat) : ClinicalTrajectory :=
+  if (stage_delta >? 0)%Z then
+    if hours <? 6 then RapidDeterioration
+    else Worsening
+  else if (stage_delta <? 0)%Z then Improving
+  else Stable.
+
+(* Velocity: stages per 24 hours (scaled by 10 for precision) *)
+Definition stage_velocity_x10 (delta : TemporalDelta) : Z :=
+  if delta_hours delta =? 0 then 0%Z
+  else ((stage_change delta * 240) / Z.of_nat (delta_hours delta))%Z.
+
+(* Threshold for rapid deterioration: >1 stage per 12 hours *)
+Definition is_rapid_deterioration (delta : TemporalDelta) : bool :=
+  (stage_velocity_x10 delta >? 20)%Z.
 
 Definition valid_transition (from to : ManagementPhase) : bool :=
   match from, to with
@@ -1183,6 +1247,242 @@ Definition overall_severity_score (c : t) : nat :=
 
 End ClinicalState.
 
+Module TimeSeries.
+
+(* An observation is a clinical state at a specific time *)
+Record Observation : Type := MkObservation {
+  obs_time_hours : nat;
+  obs_state : ClinicalState.t;
+  obs_stage : nat;                          (* cached stage 1-6 *)
+  obs_severity : nat                        (* cached severity score *)
+}.
+
+(* Create observation from clinical state *)
+Definition make_observation (time_h : nat) (state : ClinicalState.t) (stage : nat) : Observation :=
+  MkObservation time_h state stage (ClinicalState.overall_severity_score state).
+
+(* A patient time series is a list of observations, newest first *)
+Definition PatientTimeSeries := list Observation.
+
+(* Time series must be ordered by time *)
+Fixpoint is_time_ordered (ts : PatientTimeSeries) : bool :=
+  match ts with
+  | [] => true
+  | [_] => true
+  | o1 :: ((o2 :: _) as rest) =>
+      (obs_time_hours o2 <=? obs_time_hours o1) && is_time_ordered rest
+  end.
+
+(* Get latest observation *)
+Definition latest (ts : PatientTimeSeries) : option Observation :=
+  match ts with
+  | [] => None
+  | o :: _ => Some o
+  end.
+
+(* Get earliest observation *)
+Fixpoint earliest (ts : PatientTimeSeries) : option Observation :=
+  match ts with
+  | [] => None
+  | [o] => Some o
+  | _ :: rest => earliest rest
+  end.
+
+(* Number of observations *)
+Definition series_length (ts : PatientTimeSeries) : nat := length ts.
+
+(* Duration from first to last observation *)
+Definition series_duration (ts : PatientTimeSeries) : nat :=
+  match latest ts, earliest ts with
+  | Some l, Some e => obs_time_hours l - obs_time_hours e
+  | _, _ => 0
+  end.
+
+(* Stage at a given observation index (0 = latest) *)
+Definition stage_at_index (ts : PatientTimeSeries) (idx : nat) : option nat :=
+  match nth_error ts idx with
+  | Some o => Some (obs_stage o)
+  | None => None
+  end.
+
+(* Compute stage change between two indices *)
+Definition stage_change (ts : PatientTimeSeries) (earlier_idx later_idx : nat) : option Z :=
+  match stage_at_index ts later_idx, stage_at_index ts earlier_idx with
+  | Some s2, Some s1 => Some (Z.of_nat s2 - Z.of_nat s1)%Z
+  | _, _ => None
+  end.
+
+(* Determine if patient is worsening (latest stage > earliest stage) *)
+Definition is_worsening (ts : PatientTimeSeries) : bool :=
+  match latest ts, earliest ts with
+  | Some l, Some e => obs_stage e <? obs_stage l
+  | _, _ => false
+  end.
+
+(* Determine if patient is improving *)
+Definition is_improving (ts : PatientTimeSeries) : bool :=
+  match latest ts, earliest ts with
+  | Some l, Some e => obs_stage l <? obs_stage e
+  | _, _ => false
+  end.
+
+(* Determine if patient is stable *)
+Definition is_stable (ts : PatientTimeSeries) : bool :=
+  match latest ts, earliest ts with
+  | Some l, Some e => obs_stage l =? obs_stage e
+  | _, _ => true
+  end.
+
+(* Count stage escalations in time series *)
+Fixpoint count_escalations (ts : PatientTimeSeries) : nat :=
+  match ts with
+  | [] | [_] => 0
+  | o1 :: ((o2 :: _) as rest) =>
+      (if obs_stage o2 <? obs_stage o1 then 1 else 0) + count_escalations rest
+  end.
+
+(* Count stage improvements in time series *)
+Fixpoint count_improvements (ts : PatientTimeSeries) : nat :=
+  match ts with
+  | [] | [_] => 0
+  | o1 :: ((o2 :: _) as rest) =>
+      (if obs_stage o1 <? obs_stage o2 then 1 else 0) + count_improvements rest
+  end.
+
+(* Maximum stage reached in series *)
+Fixpoint max_stage (ts : PatientTimeSeries) : nat :=
+  match ts with
+  | [] => 0
+  | [o] => obs_stage o
+  | o :: rest => Nat.max (obs_stage o) (max_stage rest)
+  end.
+
+(* Minimum stage in series *)
+Fixpoint min_stage (ts : PatientTimeSeries) : nat :=
+  match ts with
+  | [] => 0
+  | [o] => obs_stage o
+  | o :: rest => Nat.min (obs_stage o) (min_stage rest)
+  end.
+
+(* Stage range (max - min) *)
+Definition stage_range (ts : PatientTimeSeries) : nat :=
+  max_stage ts - min_stage ts.
+
+(* Compute trajectory from time series *)
+Definition compute_trajectory (ts : PatientTimeSeries) : TemporalProgression.ClinicalTrajectory :=
+  match latest ts, earliest ts with
+  | Some l, Some e =>
+      let stage_delta := (Z.of_nat (obs_stage l) - Z.of_nat (obs_stage e))%Z in
+      let duration := obs_time_hours l - obs_time_hours e in
+      if (stage_delta >? 1)%Z then
+        if duration <? 12 then TemporalProgression.RapidDeterioration
+        else TemporalProgression.Worsening
+      else if (stage_delta >? 0)%Z then TemporalProgression.Worsening
+      else if (stage_delta <? 0)%Z then TemporalProgression.Improving
+      else TemporalProgression.Stable
+  | _, _ => TemporalProgression.Stable
+  end.
+
+(* Rate of change: stages per 24 hours (x10 for precision) *)
+Definition stage_velocity_x10 (ts : PatientTimeSeries) : Z :=
+  match latest ts, earliest ts with
+  | Some l, Some e =>
+      let stage_delta := (Z.of_nat (obs_stage l) - Z.of_nat (obs_stage e))%Z in
+      let duration := obs_time_hours l - obs_time_hours e in
+      if duration =? 0 then 0%Z
+      else ((stage_delta * 240) / Z.of_nat duration)%Z
+  | _, _ => 0%Z
+  end.
+
+(* Severity trend: positive = worsening, negative = improving *)
+Definition severity_trend (ts : PatientTimeSeries) : Z :=
+  match latest ts, earliest ts with
+  | Some l, Some e =>
+      (Z.of_nat (obs_severity l) - Z.of_nat (obs_severity e))%Z
+  | _, _ => 0%Z
+  end.
+
+(* Check if any observation reached Stage IIIB (stage 6) *)
+Definition reached_stage_IIIB (ts : PatientTimeSeries) : bool :=
+  6 <=? max_stage ts.
+
+(* Check if surgical threshold was crossed *)
+Definition crossed_surgical_threshold (ts : PatientTimeSeries) : bool :=
+  match earliest ts with
+  | Some e => (obs_stage e <? 6) && reached_stage_IIIB ts
+  | None => false
+  end.
+
+(* Find first observation at or above a stage threshold *)
+Fixpoint first_at_stage (ts : PatientTimeSeries) (threshold : nat) : option Observation :=
+  match ts with
+  | [] => None
+  | o :: rest =>
+      match first_at_stage rest threshold with
+      | Some found => Some found
+      | None => if threshold <=? obs_stage o then Some o else None
+      end
+  end.
+
+(* Time to reach a given stage (None if never reached) *)
+Definition time_to_stage (ts : PatientTimeSeries) (threshold : nat) : option nat :=
+  match first_at_stage ts threshold, earliest ts with
+  | Some target, Some start => Some (obs_time_hours target - obs_time_hours start)
+  | _, _ => None
+  end.
+
+(* Add observation to time series (maintains time ordering) *)
+Definition add_observation (obs : Observation) (ts : PatientTimeSeries) : PatientTimeSeries :=
+  obs :: ts.
+
+(* Proofs about time series properties *)
+
+Lemma empty_series_stable : compute_trajectory [] = TemporalProgression.Stable.
+Proof. reflexivity. Qed.
+
+Lemma singleton_series_stable : forall o,
+  compute_trajectory [o] = TemporalProgression.Stable.
+Proof.
+  intros o. unfold compute_trajectory, latest, earliest. simpl.
+  rewrite Z.sub_diag. reflexivity.
+Qed.
+
+Lemma worsening_implies_not_improving : forall ts,
+  is_worsening ts = true -> is_improving ts = false.
+Proof.
+  intros ts H.
+  unfold is_worsening, is_improving in *.
+  destruct (latest ts) as [l|]; destruct (earliest ts) as [e|]; try discriminate.
+  apply Nat.ltb_lt in H.
+  apply Nat.ltb_ge. lia.
+Qed.
+
+Lemma stable_implies_no_escalations_single : forall o,
+  count_escalations [o] = 0.
+Proof. reflexivity. Qed.
+
+Lemma max_stage_ge_latest : forall ts o,
+  latest ts = Some o -> obs_stage o <= max_stage ts.
+Proof.
+  intros ts o H.
+  destruct ts as [|o' rest].
+  - discriminate.
+  - simpl in H. inversion H. subst. simpl.
+    destruct rest as [|o2 rest2].
+    + lia.
+    + apply Nat.le_max_l.
+Qed.
+
+Lemma reached_IIIB_implies_max_ge_6 : forall ts,
+  reached_stage_IIIB ts = true -> 6 <= max_stage ts.
+Proof.
+  intros ts H. unfold reached_stage_IIIB in H.
+  apply Nat.leb_le in H. exact H.
+Qed.
+
+End TimeSeries.
+
 Module Classification.
 
 Definition has_any_findings (c : ClinicalState.t) : bool :=
@@ -1251,6 +1551,90 @@ Lemma no_findings_diagnoses_not_nec : forall c,
 Proof.
   intros c H. unfold diagnose. rewrite H. reflexivity.
 Qed.
+
+(* Trajectory-aware classification using time series *)
+
+(* Classify based on latest observation in time series *)
+Definition classify_from_series (ts : TimeSeries.PatientTimeSeries) : option Stage.t :=
+  match TimeSeries.latest ts with
+  | Some obs => Some (classify (TimeSeries.obs_state obs))
+  | None => None
+  end.
+
+(* Get trajectory-adjusted urgency level *)
+Inductive UrgencyLevel : Type :=
+  | Routine : UrgencyLevel
+  | Elevated : UrgencyLevel
+  | Urgent : UrgencyLevel
+  | Emergent : UrgencyLevel.
+
+Definition urgency_from_trajectory (traj : TemporalProgression.ClinicalTrajectory)
+    (current_stage : Stage.t) : UrgencyLevel :=
+  match traj, current_stage with
+  | TemporalProgression.RapidDeterioration, _ => Emergent
+  | TemporalProgression.Worsening, Stage.IIIA => Emergent
+  | TemporalProgression.Worsening, Stage.IIB => Urgent
+  | TemporalProgression.Worsening, _ => Elevated
+  | TemporalProgression.Stable, Stage.IIIA => Urgent
+  | TemporalProgression.Stable, Stage.IIIB => Emergent
+  | TemporalProgression.Stable, _ => Routine
+  | TemporalProgression.Improving, _ => Routine
+  end.
+
+(* Classify with trajectory context *)
+Record TrajectoryAwareClassification : Type := MkTrajectoryAware {
+  tac_stage : Stage.t;
+  tac_trajectory : TemporalProgression.ClinicalTrajectory;
+  tac_urgency : UrgencyLevel;
+  tac_escalation_count : nat;
+  tac_hours_at_current_stage : nat
+}.
+
+Definition classify_with_trajectory (ts : TimeSeries.PatientTimeSeries)
+    : option TrajectoryAwareClassification :=
+  match TimeSeries.latest ts with
+  | Some obs =>
+      let stage := classify (TimeSeries.obs_state obs) in
+      let traj := TimeSeries.compute_trajectory ts in
+      let urg := urgency_from_trajectory traj stage in
+      let esc := TimeSeries.count_escalations ts in
+      let hrs := match TimeSeries.first_at_stage ts (Stage.to_nat stage) with
+                 | Some first_obs =>
+                     TimeSeries.obs_time_hours obs - TimeSeries.obs_time_hours first_obs
+                 | None => 0
+                 end in
+      Some (MkTrajectoryAware stage traj urg esc hrs)
+  | None => None
+  end.
+
+(* Determine if escalation of care is warranted based on trajectory *)
+Definition escalation_warranted (ts : TimeSeries.PatientTimeSeries) : bool :=
+  match classify_with_trajectory ts with
+  | Some tac =>
+      match tac_urgency tac with
+      | Emergent => true
+      | Urgent => true
+      | _ => false
+      end
+  | None => false
+  end.
+
+(* Recommend reassessment interval based on trajectory *)
+Definition recommended_reassess_hours (ts : TimeSeries.PatientTimeSeries) : nat :=
+  match classify_with_trajectory ts with
+  | Some tac =>
+      match tac_urgency tac with
+      | Emergent => 1
+      | Urgent => 2
+      | Elevated => 4
+      | Routine => 8
+      end
+  | None => 8
+  end.
+
+Lemma rapid_deterioration_always_emergent : forall stage,
+  urgency_from_trajectory TemporalProgression.RapidDeterioration stage = Emergent.
+Proof. intros []; reflexivity. Qed.
 
 End Classification.
 
@@ -1527,6 +1911,61 @@ Definition stage_IIIA_witness : ClinicalState.t :=
 
 Lemma stage_IIIA_witness_classifies_correctly :
   Classification.classify stage_IIIA_witness = Stage.IIIA.
+Proof. reflexivity. Qed.
+
+(* Time series witness examples *)
+
+(* Observation at hour 0: Stage IA *)
+Definition obs_hour_0 : TimeSeries.Observation :=
+  TimeSeries.MkObservation 0 stage_IA_witness 1 5.
+
+(* Observation at hour 6: Stage IIA (worsening) *)
+Definition obs_hour_6 : TimeSeries.Observation :=
+  TimeSeries.MkObservation 6 stage_IIA_witness 3 12.
+
+(* Observation at hour 12: Stage IIB (continued worsening) *)
+Definition obs_hour_12 : TimeSeries.Observation :=
+  TimeSeries.MkObservation 12 stage_IIB_witness 4 15.
+
+(* Observation at hour 24: Stage IIIA (severe) *)
+Definition obs_hour_24 : TimeSeries.Observation :=
+  TimeSeries.MkObservation 24 stage_IIIA_witness 5 18.
+
+(* Time series showing progressive deterioration over 24 hours *)
+Definition deteriorating_series : TimeSeries.PatientTimeSeries :=
+  [obs_hour_24; obs_hour_12; obs_hour_6; obs_hour_0].
+
+(* Time series showing stable course *)
+Definition stable_series : TimeSeries.PatientTimeSeries :=
+  [obs_hour_6; TimeSeries.MkObservation 3 stage_IIA_witness 3 12;
+   TimeSeries.MkObservation 0 stage_IIA_witness 3 11].
+
+Lemma deteriorating_series_is_worsening :
+  TimeSeries.is_worsening deteriorating_series = true.
+Proof. reflexivity. Qed.
+
+Lemma deteriorating_series_trajectory :
+  TimeSeries.compute_trajectory deteriorating_series = TemporalProgression.Worsening.
+Proof. reflexivity. Qed.
+
+Lemma deteriorating_series_escalation_count :
+  TimeSeries.count_escalations deteriorating_series = 3.
+Proof. reflexivity. Qed.
+
+Lemma stable_series_is_stable :
+  TimeSeries.is_stable stable_series = true.
+Proof. reflexivity. Qed.
+
+Lemma stable_series_trajectory :
+  TimeSeries.compute_trajectory stable_series = TemporalProgression.Stable.
+Proof. reflexivity. Qed.
+
+Lemma deteriorating_max_stage :
+  TimeSeries.max_stage deteriorating_series = 5.
+Proof. reflexivity. Qed.
+
+Lemma deteriorating_series_duration :
+  TimeSeries.series_duration deteriorating_series = 24.
 Proof. reflexivity. Qed.
 
 End WitnessExamples.
