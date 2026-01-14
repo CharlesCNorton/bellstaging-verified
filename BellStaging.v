@@ -1973,29 +1973,3 @@ Qed.
 Definition classify_canonical := classify_declarative.
 
 End BellCriteria.
-
-(******************************************************************************)
-(*                           EXTRACTION DIRECTIVES                            *)
-(******************************************************************************)
-
-(* Extraction to OCaml for runtime use *)
-Require Extraction.
-
-(* Map Coq types to efficient OCaml representations *)
-Extract Inductive bool => "bool" [ "true" "false" ].
-Extract Inductive nat => "int" [ "0" "succ" ]
-  "(fun fO fS n -> if n=0 then fO () else fS (n-1))".
-Extract Inductive option => "option" [ "Some" "None" ].
-Extract Inductive list => "list" [ "[]" "(::)" ].
-
-(* Extract key modules for clinical decision support *)
-Extraction "BellStagingExtracted.ml"
-  Stage.t Stage.to_nat
-  ClinicalState.t ClinicalState.MkClinicalState
-  Classification.classify Classification.diagnose
-  Treatment.of_stage Treatment.requires_surgery
-  BellCriteria.classify_declarative
-  RiskFactors.risk_score RiskFactors.high_risk
-  LabValues.thrombocytopenia LabValues.severe_thrombocytopenia
-  SurgicalIndications.surgery_indicated
-  Prognosis.mortality_risk_percent.
