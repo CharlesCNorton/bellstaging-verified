@@ -19,37 +19,26 @@
 (******************************************************************************)
 (*                              KNOWN ISSUES                                  *)
 (*                                                                            *)
-(*  1. Change antibiotic functions to accept Stage.t and convert internally   *)
-(*  2. Wrap optional clinical fields in option types                          *)
-(*  3. Add timestamp fields to Microbiology.t for collection and result times *)
-(*  4. Add is_time_ordered ts = true as hypothesis to all time series lemmas  *)
-(*  5. Extract risk score weights into ClinicalParameters records             *)
-(*  6. Extract organ failure thresholds into named parameters                 *)
-(*  7. Make severe_thrombocytopenia exclude thrombocytopenia score or         *)
-(*     document intentional stacking                                          *)
-(*  8. Unify coagulation assessment to use consistent PT/INR logic            *)
-(*  9. Replace hardcoded 7 in npo_duration_by_stage with npo_stage_II         *)
-(* 10. Delete breast_milk_protective or integrate into risk score             *)
-(* 11. Wire VitalSigns.hypotension into SystemicSigns or delete GA-dependent  *)
-(* 12. Use nec_confidence/sip_confidence scores in most_likely_diagnosis      *)
-(* 13. Add stage parameter to hours_to_reassess and use in interval calc      *)
-(* 14. Route ClinicalState.has_dic into classify_stage logic                  *)
-(* 15. Consolidate Stage IIB conditions into single canonical form            *)
-(* 16. Align Stage IIIA criteria between both classifiers                     *)
-(* 17. Delete classify_canonical or prove it equivalent to classify_stage     *)
-(* 18. Prove forall c, classify_stage c = classify_declarative c              *)
-(* 19. Prove signs_subset c1 c2 -> Stage.leb (classify c1) (classify c2)      *)
-(* 20. Prove pneumoperitoneum c = false -> ... -> classify c <> Stage.IIIB    *)
-(* 21. Prove totality via boolean reflection or enumeration                   *)
-(* 22. Prove each stage has witness and witnesses span all stages             *)
-(* 23. Define valid_transition as inductive relation with eauto hints         *)
-(* 24. Add Stabilization -> SurgicalEvaluation to valid transitions           *)
-(* 25. Unify SurgicalIndications.surgery_indicated with requires_surgery      *)
-(* 26. Add sign_timestamp or sign_active fields, filter stale signs           *)
-(* 27. Change RapidDeterioration threshold to velocity-based                  *)
-(* 28. Relax SIP criteria to allow coexistence with mild NEC signs            *)
-(* 29. Replace prognosis nat with record containing low/mid/high estimates    *)
-(* 30. Add module with published case studies as witness validation suite     *)
+(*  1. Wire VitalSigns.hypotension into SystemicSigns                         *)
+(*  2. Use nec_confidence/sip_confidence scores in most_likely_diagnosis      *)
+(*  3. Add stage parameter to hours_to_reassess and use in interval calc      *)
+(*  4. Route ClinicalState.has_dic into classify_stage logic                  *)
+(*  5. Consolidate Stage IIB conditions into single canonical form            *)
+(*  6. Align Stage IIIA criteria between both classifiers                     *)
+(*  7. Delete classify_canonical or prove it equivalent to classify_stage     *)
+(*  8. Prove forall c, classify_stage c = classify_declarative c              *)
+(*  9. Prove signs_subset c1 c2 -> Stage.leb (classify c1) (classify c2)      *)
+(* 10. Prove pneumoperitoneum c = false -> ... -> classify c <> Stage.IIIB    *)
+(* 11. Prove totality via boolean reflection or enumeration                   *)
+(* 12. Prove each stage has witness and witnesses span all stages             *)
+(* 13. Define valid_transition as inductive relation with eauto hints         *)
+(* 14. Add Stabilization -> SurgicalEvaluation to valid transitions           *)
+(* 15. Unify SurgicalIndications.surgery_indicated with requires_surgery      *)
+(* 16. Add sign_timestamp or sign_active fields, filter stale signs           *)
+(* 17. Change RapidDeterioration threshold to velocity-based                  *)
+(* 18. Relax SIP criteria to allow coexistence with mild NEC signs            *)
+(* 19. Replace prognosis nat with record containing low/mid/high estimates    *)
+(* 20. Add module with published case studies as witness validation suite     *)
 (*                                                                            *)
 (******************************************************************************)
 
@@ -108,8 +97,49 @@ Definition npo_duration_stage_II :=
 Definition npo_duration_stage_III :=
   MkParam 14 walsh_kliegman_1986 1986.
 
-Definition breast_milk_protective :=
-  MkParam 1 neu_walker_2011 2011.
+(* Risk score weights with provenance *)
+Definition lucas_cole_1990 : nat := 6.
+Definition sharma_2006 : nat := 7.
+Definition mcelhinney_2000 : nat := 8.
+
+Definition weight_extremely_preterm := MkParam 4 neu_walker_2011 2011.
+Definition weight_very_preterm := MkParam 3 neu_walker_2011 2011.
+Definition weight_moderate_preterm := MkParam 2 neu_walker_2011 2011.
+Definition weight_elbw := MkParam 4 gephart_2012 2012.
+Definition weight_vlbw := MkParam 3 gephart_2012 2012.
+Definition weight_lbw := MkParam 1 gephart_2012 2012.
+Definition weight_formula_fed := MkParam 1 lucas_cole_1990 1990.
+Definition weight_breast_milk_protective := MkParam 2 lucas_cole_1990 1990.
+Definition weight_perinatal_asphyxia := MkParam 2 sharma_2006 2006.
+Definition weight_chd := MkParam 2 mcelhinney_2000 2000.
+Definition weight_polycythemia := MkParam 1 walsh_kliegman_1986 1986.
+Definition weight_umbilical_catheter := MkParam 1 walsh_kliegman_1986 1986.
+Definition weight_exchange_transfusion := MkParam 1 walsh_kliegman_1986 1986.
+
+(* Organ failure thresholds - nSOFA/SNAP-II based *)
+Definition wynn_2017 : nat := 9.
+Definition richardson_2001 : nat := 10.
+
+Definition pf_ratio_severe := MkParam 100 wynn_2017 2017.
+Definition pf_ratio_moderate := MkParam 200 wynn_2017 2017.
+Definition pf_ratio_mild := MkParam 300 wynn_2017 2017.
+Definition fio2_mild := MkParam 30 richardson_2001 2001.
+Definition fio2_moderate := MkParam 40 richardson_2001 2001.
+Definition map_hypotension := MkParam 30 wynn_2017 2017.
+Definition lactate_elevated_x10 := MkParam 20 wynn_2017 2017.
+Definition bilirubin_mild := MkParam 2 wynn_2017 2017.
+Definition bilirubin_moderate := MkParam 6 wynn_2017 2017.
+Definition bilirubin_severe := MkParam 12 wynn_2017 2017.
+Definition platelets_moderate := MkParam 100 wynn_2017 2017.
+Definition platelets_severe := MkParam 50 wynn_2017 2017.
+Definition inr_elevated_x100 := MkParam 150 wynn_2017 2017.
+Definition inr_severe_x100 := MkParam 200 wynn_2017 2017.
+Definition creatinine_mild_x10 := MkParam 10 wynn_2017 2017.
+Definition creatinine_moderate_x10 := MkParam 15 wynn_2017 2017.
+Definition creatinine_severe_x10 := MkParam 20 wynn_2017 2017.
+Definition urine_oliguria_x10 := MkParam 5 richardson_2001 2001.
+Definition urine_low_x10 := MkParam 10 richardson_2001 2001.
+Definition organ_failure_threshold := MkParam 2 wynn_2017 2017.
 
 End ClinicalParameters.
 
@@ -155,35 +185,55 @@ Definition very_low_birth_weight (r : t) : bool :=
 Definition low_birth_weight (r : t) : bool :=
   (vlbw_grams <=? birth_weight_grams r) && (birth_weight_grams r <? 2500).
 
-(* Risk score weights derived from:
-   - Gestational age: Neu & Walker 2011, Pediatr Res 70(2):183-188
-     OR 4.4 for <28 wk, OR 2.8 for 28-32 wk (weights: 4, 3, 2)
-   - Birth weight: Gephart et al. 2012, Adv Neonatal Care 12(2):77-87
-     ELBW (<1000g) highest risk, VLBW intermediate (weights: 4, 3, 1)
-   - Formula feeding: Lucas & Cole 1990, Lancet 336(8730):1519-1523
-     6-10x increased risk vs exclusive breast milk (weight: 1)
-   - Perinatal asphyxia: Sharma et al. 2006, J Perinatol 26(8):490-494
-     OR 2.3 for hypoxic-ischemic injury (weight: 2)
-   - Congenital heart disease: McElhinney et al. 2000, Pediatrics 106(5):1080-1087
-     OR 2.1 for ductal-dependent lesions (weight: 2)
-   - Polycythemia, umbilical catheter, exchange transfusion:
-     Walsh & Kliegman 1986, Pediatr Clin North Am 33(1):179-201 (weight: 1 each) *)
+(* Risk score weights now in ClinicalParameters with provenance *)
+Definition w_extremely_preterm : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_extremely_preterm.
+Definition w_very_preterm : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_very_preterm.
+Definition w_moderate_preterm : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_moderate_preterm.
+Definition w_elbw : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_elbw.
+Definition w_vlbw : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_vlbw.
+Definition w_lbw : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_lbw.
+Definition w_formula_fed : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_formula_fed.
+Definition w_breast_milk_protective : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_breast_milk_protective.
+Definition w_perinatal_asphyxia : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_perinatal_asphyxia.
+Definition w_chd : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_chd.
+Definition w_polycythemia : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_polycythemia.
+Definition w_umbilical_catheter : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_umbilical_catheter.
+Definition w_exchange_transfusion : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_exchange_transfusion.
+
+Definition risk_score_raw (r : t) : nat :=
+  (if extremely_preterm r then w_extremely_preterm
+   else if very_preterm r then w_very_preterm
+   else if moderate_preterm r then w_moderate_preterm
+   else 0) +
+  (if extremely_low_birth_weight r then w_elbw
+   else if very_low_birth_weight r then w_vlbw
+   else if low_birth_weight r then w_lbw
+   else 0) +
+  (if formula_fed r then w_formula_fed else 0) +
+  (if history_of_perinatal_asphyxia r then w_perinatal_asphyxia else 0) +
+  (if congenital_heart_disease r then w_chd else 0) +
+  (if polycythemia r then w_polycythemia else 0) +
+  (if umbilical_catheter r then w_umbilical_catheter else 0) +
+  (if exchange_transfusion r then w_exchange_transfusion else 0).
+
+Definition protective_factor (r : t) : nat :=
+  if formula_fed r then 0 else w_breast_milk_protective.
 
 Definition risk_score (r : t) : nat :=
-  (if extremely_preterm r then 4
-   else if very_preterm r then 3
-   else if moderate_preterm r then 2
-   else 0) +
-  (if extremely_low_birth_weight r then 4
-   else if very_low_birth_weight r then 3
-   else if low_birth_weight r then 1
-   else 0) +
-  (if formula_fed r then 1 else 0) +
-  (if history_of_perinatal_asphyxia r then 2 else 0) +
-  (if congenital_heart_disease r then 2 else 0) +
-  (if polycythemia r then 1 else 0) +
-  (if umbilical_catheter r then 1 else 0) +
-  (if exchange_transfusion r then 1 else 0).
+  risk_score_raw r - protective_factor r.
 
 Definition high_risk (r : t) : bool :=
   6 <=? risk_score r.
@@ -193,9 +243,9 @@ Lemma extremely_preterm_high_risk : forall r,
   extremely_low_birth_weight r = true ->
   high_risk r = true.
 Proof.
-  intros r Hp Hw. unfold high_risk, risk_score.
+  intros r Hp Hw. unfold high_risk, risk_score, risk_score_raw, protective_factor.
   rewrite Hp, Hw. simpl.
-  reflexivity.
+  destruct (formula_fed r); reflexivity.
 Qed.
 
 End RiskFactors.
@@ -273,8 +323,9 @@ Definition sepsis_markers_elevated (l : t) : bool :=
 Definition lab_severity_score (l : t) : nat :=
   (if leukopenia l || leukocytosis l then 1 else 0) +
   (if neutropenia l then 2 else 0) +
-  (if thrombocytopenia l then 1 else 0) +
-  (if severe_thrombocytopenia l then 2 else 0) +
+  (if severe_thrombocytopenia l then 2
+   else if thrombocytopenia l then 1
+   else 0) +
   (if elevated_crp l then 1 else 0) +
   (if elevated_lactate l then 2 else 0) +
   (if metabolic_acidosis l then 2 else 0) +
@@ -304,11 +355,15 @@ Record t : Type := MkCoagPanel {
   ionized_calcium_x100 : nat  (* mmol/L * 100 *)
 }.
 
+(* Using same INR thresholds as NeonatalOrganFailure for consistency *)
+Definition inr_threshold : nat :=
+  ClinicalParameters.param_value ClinicalParameters.inr_elevated_x100.
+
 Definition pt_prolonged (c : t) : bool :=
   150 <? pt_seconds_x10 c.
 
 Definition inr_elevated (c : t) : bool :=
-  150 <? inr_x100 c.
+  inr_threshold <? inr_x100 c.
 
 Definition hypofibrinogenemia (c : t) : bool :=
   fibrinogen_mg_dL c <? 100.
@@ -352,12 +407,18 @@ Inductive CultureStatus : Type :=
 
 Record t : Type := MkMicrobiology {
   blood_culture : CultureStatus;
-  csf_culture : CultureStatus;        (* for meningitis rule-out *)
-  peritoneal_culture : CultureStatus  (* if paracentesis done *)
+  blood_culture_collected_h : option nat;  (* hours since symptom onset *)
+  blood_culture_resulted_h : option nat;
+  csf_culture : CultureStatus;             (* for meningitis rule-out *)
+  csf_culture_collected_h : option nat;
+  csf_culture_resulted_h : option nat;
+  peritoneal_culture : CultureStatus;      (* if paracentesis done *)
+  peritoneal_culture_collected_h : option nat;
+  peritoneal_culture_resulted_h : option nat
 }.
 
 Definition none : t :=
-  MkMicrobiology NotCollected NotCollected NotCollected.
+  MkMicrobiology NotCollected None None NotCollected None None NotCollected None None.
 
 Definition is_positive (c : CultureStatus) : bool :=
   match c with
@@ -484,53 +545,76 @@ Module NeonatalOrganFailure.
    - SNAP-II: Richardson et al. 2001, Pediatrics 107(1):61-66
 
    Each organ system scored 0-4 based on severity of dysfunction.
-   Total score correlates with mortality risk in sepsis/NEC. *)
+   Total score correlates with mortality risk in sepsis/NEC.
+   Thresholds now in ClinicalParameters with provenance. *)
+
+(* Threshold accessors *)
+Definition pf_severe : nat := ClinicalParameters.param_value ClinicalParameters.pf_ratio_severe.
+Definition pf_moderate : nat := ClinicalParameters.param_value ClinicalParameters.pf_ratio_moderate.
+Definition pf_mild : nat := ClinicalParameters.param_value ClinicalParameters.pf_ratio_mild.
+Definition fio2_th_mild : nat := ClinicalParameters.param_value ClinicalParameters.fio2_mild.
+Definition fio2_th_moderate : nat := ClinicalParameters.param_value ClinicalParameters.fio2_moderate.
+Definition map_th : nat := ClinicalParameters.param_value ClinicalParameters.map_hypotension.
+Definition lactate_th : nat := ClinicalParameters.param_value ClinicalParameters.lactate_elevated_x10.
+Definition bili_mild : nat := ClinicalParameters.param_value ClinicalParameters.bilirubin_mild.
+Definition bili_moderate : nat := ClinicalParameters.param_value ClinicalParameters.bilirubin_moderate.
+Definition bili_severe : nat := ClinicalParameters.param_value ClinicalParameters.bilirubin_severe.
+Definition plt_moderate : nat := ClinicalParameters.param_value ClinicalParameters.platelets_moderate.
+Definition plt_severe : nat := ClinicalParameters.param_value ClinicalParameters.platelets_severe.
+Definition inr_elevated : nat := ClinicalParameters.param_value ClinicalParameters.inr_elevated_x100.
+Definition inr_severe : nat := ClinicalParameters.param_value ClinicalParameters.inr_severe_x100.
+Definition cr_mild : nat := ClinicalParameters.param_value ClinicalParameters.creatinine_mild_x10.
+Definition cr_moderate : nat := ClinicalParameters.param_value ClinicalParameters.creatinine_moderate_x10.
+Definition cr_severe : nat := ClinicalParameters.param_value ClinicalParameters.creatinine_severe_x10.
+Definition urine_oliguria : nat := ClinicalParameters.param_value ClinicalParameters.urine_oliguria_x10.
+Definition urine_low : nat := ClinicalParameters.param_value ClinicalParameters.urine_low_x10.
+Definition organ_fail_th : nat := ClinicalParameters.param_value ClinicalParameters.organ_failure_threshold.
 
 (* Respiratory failure scoring *)
 Definition respiratory_score (fio2_percent : nat) (on_ventilator : bool)
     (pao2_fio2_ratio : nat) : nat :=
   if on_ventilator then
-    if pao2_fio2_ratio <? 100 then 4
-    else if pao2_fio2_ratio <? 200 then 3
-    else if pao2_fio2_ratio <? 300 then 2
+    if pao2_fio2_ratio <? pf_severe then 4
+    else if pao2_fio2_ratio <? pf_moderate then 3
+    else if pao2_fio2_ratio <? pf_mild then 2
     else 1
   else
-    if fio2_percent <? 30 then 0
-    else if fio2_percent <? 40 then 1
+    if fio2_percent <? fio2_th_mild then 0
+    else if fio2_percent <? fio2_th_moderate then 1
     else 2.
 
 (* Cardiovascular failure scoring *)
 Definition cardiovascular_score (map_mmHg : nat) (on_vasopressors : bool)
     (lactate_x10 : nat) : nat :=
   if on_vasopressors then
-    if lactate_x10 <? 20 then 3 else 4
-  else if map_mmHg <? 30 then 2
-  else if lactate_x10 <? 20 then 0 else 1.
+    if lactate_x10 <? lactate_th then 3 else 4
+  else if map_mmHg <? map_th then 2
+  else if lactate_x10 <? lactate_th then 0 else 1.
 
 (* Hepatic failure scoring *)
 Definition hepatic_score (bilirubin_mg_dL : nat) : nat :=
-  if bilirubin_mg_dL <? 2 then 0
-  else if bilirubin_mg_dL <? 6 then 1
-  else if bilirubin_mg_dL <? 12 then 2
+  if bilirubin_mg_dL <? bili_mild then 0
+  else if bilirubin_mg_dL <? bili_moderate then 1
+  else if bilirubin_mg_dL <? bili_severe then 2
   else 3.
 
 (* Coagulation failure scoring *)
 Definition coagulation_score (platelets_k : nat) (inr_x100 : nat) : nat :=
-  (if platelets_k <? 50 then 2
-   else if platelets_k <? 100 then 1
+  (if platelets_k <? plt_severe then 2
+   else if platelets_k <? plt_moderate then 1
    else 0) +
-  (if inr_x100 <? 150 then 0
-   else if inr_x100 <? 200 then 1
+  (if inr_x100 <? inr_elevated then 0
+   else if inr_x100 <? inr_severe then 1
    else 2).
 
 (* Renal failure scoring *)
 Definition renal_score (creatinine_mg_dL_x10 : nat) (urine_output_ml_kg_hr_x10 : nat) : nat :=
-  (if creatinine_mg_dL_x10 <? 10 then 0
-   else if creatinine_mg_dL_x10 <? 15 then 1
-   else if creatinine_mg_dL_x10 <? 20 then 2
+  (if creatinine_mg_dL_x10 <? cr_mild then 0
+   else if creatinine_mg_dL_x10 <? cr_moderate then 1
+   else if creatinine_mg_dL_x10 <? cr_severe then 2
    else 3) +
-  (if urine_output_ml_kg_hr_x10 <? 5 then 2
-   else if urine_output_ml_kg_hr_x10 <? 10 then 1
+  (if urine_output_ml_kg_hr_x10 <? urine_oliguria then 2
+   else if urine_output_ml_kg_hr_x10 <? urine_low then 1
    else 0).
 
 (* Neurologic assessment - simplified for neonates *)
@@ -563,15 +647,15 @@ Definition total_score (o : OrganFailureAssessment) : nat :=
   renal_score_val o + neuro_score o.
 
 Definition organ_systems_failing (o : OrganFailureAssessment) : nat :=
-  (if 2 <=? resp_score o then 1 else 0) +
-  (if 2 <=? cv_score o then 1 else 0) +
-  (if 2 <=? hep_score o then 1 else 0) +
-  (if 2 <=? coag_score o then 1 else 0) +
-  (if 2 <=? renal_score_val o then 1 else 0) +
-  (if 2 <=? neuro_score o then 1 else 0).
+  (if organ_fail_th <=? resp_score o then 1 else 0) +
+  (if organ_fail_th <=? cv_score o then 1 else 0) +
+  (if organ_fail_th <=? hep_score o then 1 else 0) +
+  (if organ_fail_th <=? coag_score o then 1 else 0) +
+  (if organ_fail_th <=? renal_score_val o then 1 else 0) +
+  (if organ_fail_th <=? neuro_score o then 1 else 0).
 
 Definition multiorgan_dysfunction (o : OrganFailureAssessment) : bool :=
-  2 <=? organ_systems_failing o.
+  organ_fail_th <=? organ_systems_failing o.
 
 Lemma mods_requires_two_organs : forall o,
   multiorgan_dysfunction o = true -> 2 <= organ_systems_failing o.
@@ -664,6 +748,40 @@ Qed.
 
 End DifferentialDiagnosis.
 
+Module Stage.
+
+Inductive t : Type :=
+  | IA : t
+  | IB : t
+  | IIA : t
+  | IIB : t
+  | IIIA : t
+  | IIIB : t.
+
+Definition to_nat (s : t) : nat :=
+  match s with
+  | IA => 1
+  | IB => 2
+  | IIA => 3
+  | IIB => 4
+  | IIIA => 5
+  | IIIB => 6
+  end.
+
+Definition le (s1 s2 : t) : Prop :=
+  to_nat s1 <= to_nat s2.
+
+Definition leb (s1 s2 : t) : bool :=
+  to_nat s1 <=? to_nat s2.
+
+Lemma to_nat_lower_bound : forall s, 1 <= to_nat s.
+Proof. intros []; simpl; lia. Qed.
+
+Lemma to_nat_upper_bound : forall s, to_nat s <= 6.
+Proof. intros []; simpl; lia. Qed.
+
+End Stage.
+
 Module Antibiotics.
 
 Inductive Agent : Type :=
@@ -709,26 +827,25 @@ Definition has_gram_negative_coverage (r : Regimen) : bool :=
   | Broad_PipTazo => true
   end.
 
-Definition recommended_regimen_by_stage (stage_nat : nat) : Regimen :=
-  match stage_nat with
-  | 1 | 2 => Empiric_AmpGent
-  | 3 | 4 => Empiric_AmpGentMetro
-  | _ => Broad_VancMeropenem
+Definition recommended_regimen_by_stage (s : Stage.t) : Regimen :=
+  match s with
+  | Stage.IA | Stage.IB => Empiric_AmpGent
+  | Stage.IIA | Stage.IIB => Empiric_AmpGentMetro
+  | Stage.IIIA | Stage.IIIB => Broad_VancMeropenem
   end.
 
-Definition duration_days (stage_nat : nat) : nat :=
-  match stage_nat with
-  | 1 | 2 => 3
-  | 3 | 4 => 10
-  | _ => 14
+Definition duration_days (s : Stage.t) : nat :=
+  match s with
+  | Stage.IA | Stage.IB => 3
+  | Stage.IIA | Stage.IIB => 10
+  | Stage.IIIA | Stage.IIIB => 14
   end.
 
-Lemma advanced_nec_has_anaerobic_coverage : forall n,
-  5 <= n ->
-  has_anaerobic_coverage (recommended_regimen_by_stage n) = true.
+Lemma advanced_nec_has_anaerobic_coverage : forall s,
+  Stage.to_nat s >= 5 ->
+  has_anaerobic_coverage (recommended_regimen_by_stage s) = true.
 Proof.
-  intros n H. unfold recommended_regimen_by_stage.
-  destruct n as [|[|[|[|[|n']]]]]; simpl; try lia; reflexivity.
+  intros s H. destruct s; simpl in *; try lia; reflexivity.
 Qed.
 
 End Antibiotics.
@@ -765,7 +882,7 @@ Definition npo_stage_III : nat :=
 Definition npo_duration_by_stage (stage_nat : nat) : nat :=
   match stage_nat with
   | 1 | 2 => npo_stage_I
-  | 3 | 4 => 7   (* Stage II uses intermediate; literature varies 7-10 days *)
+  | 3 | 4 => npo_stage_II
   | 5 => npo_stage_III
   | _ => npo_stage_III
   end.
@@ -1013,40 +1130,6 @@ Qed.
 
 End TemporalProgression.
 
-Module Stage.
-
-Inductive t : Type :=
-  | IA : t
-  | IB : t
-  | IIA : t
-  | IIB : t
-  | IIIA : t
-  | IIIB : t.
-
-Definition to_nat (s : t) : nat :=
-  match s with
-  | IA => 1
-  | IB => 2
-  | IIA => 3
-  | IIB => 4
-  | IIIA => 5
-  | IIIB => 6
-  end.
-
-Definition le (s1 s2 : t) : Prop :=
-  to_nat s1 <= to_nat s2.
-
-Definition leb (s1 s2 : t) : bool :=
-  to_nat s1 <=? to_nat s2.
-
-Lemma to_nat_lower_bound : forall s, 1 <= to_nat s.
-Proof. intros []; simpl; lia. Qed.
-
-Lemma to_nat_upper_bound : forall s, to_nat s <= 6.
-Proof. intros []; simpl; lia. Qed.
-
-End Stage.
-
 Module Diagnosis.
 
 Inductive t : Type :=
@@ -1219,8 +1302,8 @@ Module ClinicalState.
 
 Record t : Type := MkClinicalState {
   risk_factors : RiskFactors.t;
-  labs : LabValues.t;
-  coag : CoagulationPanel.t;
+  labs : option LabValues.t;
+  coag : option CoagulationPanel.t;
   micro : Microbiology.t;
   systemic : SystemicSigns.t;
   intestinal : IntestinalSigns.t;
@@ -1244,8 +1327,8 @@ Definition default_micro : Microbiology.t :=
 Definition empty : t :=
   MkClinicalState
     default_risk_factors
-    default_labs
-    default_coag
+    (Some default_labs)
+    (Some default_coag)
     default_micro
     SystemicSigns.none
     IntestinalSigns.none
@@ -1256,17 +1339,27 @@ Definition is_high_risk_patient (c : t) : bool :=
   RiskFactors.high_risk (risk_factors c).
 
 Definition has_lab_derangements (c : t) : bool :=
-  LabValues.sepsis_markers_elevated (labs c) ||
-  LabValues.thrombocytopenia (labs c) ||
-  LabValues.metabolic_acidosis (labs c).
+  match labs c with
+  | Some l => LabValues.sepsis_markers_elevated l ||
+              LabValues.thrombocytopenia l ||
+              LabValues.metabolic_acidosis l
+  | None => false
+  end.
 
 Definition has_coagulopathy (c : t) : bool :=
-  CoagulationPanel.coagulopathy_present (coag c).
+  match coag c with
+  | Some cp => CoagulationPanel.coagulopathy_present cp
+  | None => false
+  end.
 
 Definition has_dic (c : t) : bool :=
-  CoagulationPanel.dic_criteria_met (coag c)
-    (LabValues.severe_thrombocytopenia (labs c))
-    (LabValues.elevated_lactate (labs c)).
+  match coag c, labs c with
+  | Some cp, Some l =>
+      CoagulationPanel.dic_criteria_met cp
+        (LabValues.severe_thrombocytopenia l)
+        (LabValues.elevated_lactate l)
+  | _, _ => false
+  end.
 
 Definition has_positive_blood_culture (c : t) : bool :=
   Microbiology.blood_culture_positive (micro c).
@@ -1276,7 +1369,7 @@ Definition has_gram_negative_sepsis (c : t) : bool :=
 
 Definition overall_severity_score (c : t) : nat :=
   RiskFactors.risk_score (risk_factors c) +
-  LabValues.lab_severity_score (labs c) +
+  (match labs c with Some l => LabValues.lab_severity_score l | None => 0 end) +
   SystemicSigns.severity_score (systemic c) +
   (if has_coagulopathy c then 2 else 0) +
   (if has_dic c then 3 else 0) +
@@ -1486,9 +1579,10 @@ Proof.
 Qed.
 
 Lemma worsening_implies_not_improving : forall ts,
+  is_time_ordered ts = true ->
   is_worsening ts = true -> is_improving ts = false.
 Proof.
-  intros ts H.
+  intros ts _ H.
   unfold is_worsening, is_improving in *.
   destruct (latest ts) as [l|]; destruct (earliest ts) as [e|]; try discriminate.
   apply Nat.ltb_lt in H.
@@ -1822,8 +1916,8 @@ Definition stage_IIA_witness_radiographic : RadiographicSigns.t :=
 Definition stage_IIA_witness : ClinicalState.t :=
   ClinicalState.MkClinicalState
     preterm_risk_factors
-    abnormal_labs
-    ClinicalState.default_coag
+    (Some abnormal_labs)
+    (Some ClinicalState.default_coag)
     ClinicalState.default_micro
     stage_IIA_witness_systemic
     stage_IIA_witness_intestinal
@@ -1844,8 +1938,8 @@ Definition stage_IIIB_witness_radiographic : RadiographicSigns.t :=
 Definition stage_IIIB_witness : ClinicalState.t :=
   ClinicalState.MkClinicalState
     preterm_risk_factors
-    abnormal_labs
-    ClinicalState.default_coag
+    (Some abnormal_labs)
+    (Some ClinicalState.default_coag)
     ClinicalState.default_micro
     SystemicSigns.none
     IntestinalSigns.none
@@ -1869,8 +1963,8 @@ Definition stage_IA_witness_intestinal : IntestinalSigns.t :=
 Definition stage_IA_witness : ClinicalState.t :=
   ClinicalState.MkClinicalState
     preterm_risk_factors
-    ClinicalState.default_labs
-    ClinicalState.default_coag
+    (Some ClinicalState.default_labs)
+    (Some ClinicalState.default_coag)
     ClinicalState.default_micro
     stage_IA_witness_systemic
     stage_IA_witness_intestinal
@@ -1890,8 +1984,8 @@ Definition stage_IB_witness_intestinal : IntestinalSigns.t :=
 Definition stage_IB_witness : ClinicalState.t :=
   ClinicalState.MkClinicalState
     preterm_risk_factors
-    ClinicalState.default_labs
-    ClinicalState.default_coag
+    (Some ClinicalState.default_labs)
+    (Some ClinicalState.default_coag)
     ClinicalState.default_micro
     stage_IB_witness_systemic
     stage_IB_witness_intestinal
@@ -1914,8 +2008,8 @@ Definition stage_IIB_witness_radiographic : RadiographicSigns.t :=
 Definition stage_IIB_witness : ClinicalState.t :=
   ClinicalState.MkClinicalState
     preterm_risk_factors
-    abnormal_labs
-    ClinicalState.default_coag
+    (Some abnormal_labs)
+    (Some ClinicalState.default_coag)
     ClinicalState.default_micro
     stage_IIB_witness_systemic
     stage_IIB_witness_intestinal
@@ -1938,8 +2032,8 @@ Definition stage_IIIA_witness_radiographic : RadiographicSigns.t :=
 Definition stage_IIIA_witness : ClinicalState.t :=
   ClinicalState.MkClinicalState
     preterm_risk_factors
-    abnormal_labs
-    ClinicalState.default_coag
+    (Some abnormal_labs)
+    (Some ClinicalState.default_coag)
     ClinicalState.default_micro
     stage_IIIA_witness_systemic
     stage_IIIA_witness_intestinal
@@ -2023,8 +2117,8 @@ Proof. reflexivity. Qed.
 Definition systemic_only : ClinicalState.t :=
   ClinicalState.MkClinicalState
     ClinicalState.default_risk_factors
-    ClinicalState.default_labs
-    ClinicalState.default_coag
+    (Some ClinicalState.default_labs)
+    (Some ClinicalState.default_coag)
     ClinicalState.default_micro
     (SystemicSigns.MkSystemicSigns true true true true true true true true true true)
     IntestinalSigns.none
@@ -2038,8 +2132,8 @@ Proof. simpl. lia. Qed.
 Definition term_infant_low_risk : ClinicalState.t :=
   ClinicalState.MkClinicalState
     (RiskFactors.MkRiskFactors 40 3500 false false false false false false)
-    ClinicalState.default_labs
-    ClinicalState.default_coag
+    (Some ClinicalState.default_labs)
+    (Some ClinicalState.default_coag)
     ClinicalState.default_micro
     SystemicSigns.none
     IntestinalSigns.none
@@ -2060,8 +2154,8 @@ Definition isolated_perforation_radiographic : RadiographicSigns.t :=
 Definition isolated_perforation : ClinicalState.t :=
   ClinicalState.MkClinicalState
     (RiskFactors.MkRiskFactors 25 700 false false false false false false)
-    ClinicalState.default_labs
-    ClinicalState.default_coag
+    (Some ClinicalState.default_labs)
+    (Some ClinicalState.default_coag)
     ClinicalState.default_micro
     SystemicSigns.none
     IntestinalSigns.none
