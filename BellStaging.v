@@ -40,7 +40,7 @@
 (* 11. [DONE] compute_trajectory uses max_stage to detect non-monotonic      *)
 (*     paths; peak > current triggers different logic.                       *)
 (* 12. [DONE] Both modules now use velocity >20 for RapidDeterioration.      *)
-(* 13. Add stage parameter to hours_to_reassess.                             *)
+(* 13. [DONE] hours_to_reassess takes stage_nat; Stage III halves interval.  *)
 (* 14. Add sign_timestamp or sign_active fields, filter stale signs.         *)
 (* 15. Prove forall c, classify_stage c = classify_declarative c.            *)
 (* 16. Prove signs_subset c1 c2 -> Stage.leb (classify c1) (classify c2).   *)
@@ -1051,16 +1051,24 @@ Definition deterioration_triggers_escalation (t : ClinicalTrajectory) : bool :=
   | _ => false
   end.
 
-Definition hours_to_reassess (phase : ManagementPhase) (traj : ClinicalTrajectory) : nat :=
-  match traj with
-  | RapidDeterioration => 2
-  | Worsening => 4
-  | Stable => 6
-  | Improving => 12
-  end.
+(* Reassessment interval in hours, shortened for higher stages *)
+Definition hours_to_reassess (stage_nat : nat) (traj : ClinicalTrajectory) : nat :=
+  let base := match traj with
+              | RapidDeterioration => 2
+              | Worsening => 4
+              | Stable => 6
+              | Improving => 12
+              end in
+  if 5 <=? stage_nat then (* Stage III *)
+    Nat.max 1 (base / 2)
+  else if 3 <=? stage_nat then (* Stage II *)
+    base
+  else (* Stage I *)
+    Nat.min 12 (base + 2)
+  .
 
 Lemma rapid_deterioration_frequent_reassess :
-  hours_to_reassess ActiveTreatment RapidDeterioration = 2.
+  hours_to_reassess 5 RapidDeterioration = 1.
 Proof. reflexivity. Qed.
 
 Lemma transition_recognition_to_stabilization :
