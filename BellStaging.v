@@ -24,7 +24,7 @@
 (*                                                                            *)
 (*  1. [DONE] Consolidate classify_stage IIB into single canonical form.     *)
 (*  2. [DONE] Align IIIA radiographic axis between both classifiers.         *)
-(*  3. Kill classify_canonical alias; three names for two functions.         *)
+(*  3. [DONE] Deleted classify_canonical alias.                              *)
 (*  4. Unify SurgicalIndications.surgery_indicated with                      *)
 (*     Diagnosis.requires_surgery; they currently disagree.                  *)
 (*  5. Wire VitalSigns.hypotension into SystemicSigns.                       *)
@@ -2549,8 +2549,5 @@ Proof.
   destruct (meets_criteria c stage_IB_criteria);
   simpl; lia.
 Qed.
-
-(* Use the declarative classifier as canonical, aliased in Classification *)
-Definition classify_canonical := classify_declarative.
 
 End BellCriteria.
