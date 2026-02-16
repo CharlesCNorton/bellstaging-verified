@@ -21,7 +21,7 @@
 (*                              CURE LIST                                     *)
 (*                                                                            *)
 (*  1. [DONE] classify_inputs_monotone: ci_subset -> Stage.leb.             *)
-(*  2. Prove pneumoperitoneum c = false -> ... -> classify c <> Stage.IIIB.  *)
+(*  2. [DONE] no_perforation_not_IIIB proved.                                *)
 (*  3. Prove totality via boolean reflection or enumeration;                 *)
 (*     current classify_total is tautological.                               *)
 (*  4. Prove each stage has witness and witnesses span all stages.           *)
@@ -2377,6 +2377,19 @@ Qed.
 Theorem every_patient_staged : forall c,
   exists s, Classification.classify c = s.
 Proof. intros c. exists (Classification.classify c). reflexivity. Qed.
+
+Theorem no_perforation_not_IIIB : forall c,
+  RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = false ->
+  Classification.classify c <> Stage.IIIB.
+Proof.
+  intros c H Habs.
+  unfold Classification.classify, Classification.classify_stage in Habs.
+  rewrite H in Habs.
+  destruct ((_ && _ && _)%bool); try discriminate.
+  destruct ((_ && _ && _)%bool); try discriminate.
+  destruct ((_ && _)%bool); try discriminate.
+  destruct ((_ && _)%bool); discriminate.
+Qed.
 
 Theorem perforation_always_surgical : forall c,
   RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = true ->
