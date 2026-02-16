@@ -39,8 +39,7 @@
 (* 10. [DONE] add_observation returns option, rejects out-of-order.          *)
 (* 11. [DONE] compute_trajectory uses max_stage to detect non-monotonic      *)
 (*     paths; peak > current triggers different logic.                       *)
-(* 12. Unify RapidDeterioration thresholds between TemporalProgression       *)
-(*     (velocity >20) and TimeSeries (delta >1 in <12h); single check.      *)
+(* 12. [DONE] Both modules now use velocity >20 for RapidDeterioration.      *)
 (* 13. Add stage parameter to hours_to_reassess.                             *)
 (* 14. Add sign_timestamp or sign_active fields, filter stale signs.         *)
 (* 15. Prove forall c, classify_stage c = classify_declarative c.            *)
@@ -1558,9 +1557,10 @@ Definition compute_trajectory (ts : PatientTimeSeries) : TemporalProgression.Cli
         if (stage_delta >? 0)%Z then TemporalProgression.Worsening
         else if (stage_delta <? 0)%Z then TemporalProgression.Improving
         else TemporalProgression.Stable
-      else if (stage_delta >? 1)%Z then
-        if duration <? 12 then TemporalProgression.RapidDeterioration
-        else TemporalProgression.Worsening
+      else
+      let velocity := if duration =? 0 then 0%Z
+                      else ((stage_delta * 240) / Z.of_nat duration)%Z in
+      if (velocity >? 20)%Z then TemporalProgression.RapidDeterioration
       else if (stage_delta >? 0)%Z then TemporalProgression.Worsening
       else if (stage_delta <? 0)%Z then TemporalProgression.Improving
       else TemporalProgression.Stable
@@ -1633,7 +1633,7 @@ Lemma singleton_series_stable : forall o,
   compute_trajectory [o] = TemporalProgression.Stable.
 Proof.
   intros o. unfold compute_trajectory, latest, earliest, max_stage. simpl.
-  rewrite Nat.ltb_irrefl. rewrite Z.sub_diag. reflexivity.
+  rewrite Nat.ltb_irrefl. rewrite Z.sub_diag. rewrite Nat.sub_diag. reflexivity.
 Qed.
 
 Lemma worsening_implies_not_improving : forall ts,
@@ -2145,8 +2145,9 @@ Lemma deteriorating_series_is_worsening :
   TimeSeries.is_worsening deteriorating_series = true.
 Proof. reflexivity. Qed.
 
+(* 4 stages in 24h = velocity 40 > 20 threshold = RapidDeterioration *)
 Lemma deteriorating_series_trajectory :
-  TimeSeries.compute_trajectory deteriorating_series = TemporalProgression.Worsening.
+  TimeSeries.compute_trajectory deteriorating_series = TemporalProgression.RapidDeterioration.
 Proof. reflexivity. Qed.
 
 Lemma deteriorating_series_escalation_count :
