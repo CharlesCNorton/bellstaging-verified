@@ -33,7 +33,7 @@
 (*  6. [DONE] Route ClinicalState.has_dic into effective_stage3_sys.          *)
 (*  7. [DONE] Wire lab-derived acidosis, thrombocytopenia, neutropenia       *)
 (*     into classify_stage via effective_stage2b_sys/effective_stage3_sys.   *)
-(*  8. Use nec_confidence/sip_confidence in most_likely_diagnosis.           *)
+(*  8. [DONE] most_likely_diagnosis now uses confidence score comparison.    *)
 (*  9. Relax SIP criteria to allow coexistence with mild NEC signs.          *)
 (* 10. Enforce time ordering on PatientTimeSeries at type level;             *)
 (*     add_observation silently accepts out-of-order insertions.             *)
@@ -723,14 +723,6 @@ Definition suggests_volvulus (f : DifferentialFeatures) : bool :=
 Definition suggests_sepsis_without_nec (f : DifferentialFeatures) : bool :=
   positive_blood_culture f && negb (has_abdominal_findings f).
 
-Definition most_likely_diagnosis (f : DifferentialFeatures) : GIDifferential :=
-  if has_pneumatosis f then NEC
-  else if suggests_sip f then SpontaneousIntestinalPerforation
-  else if suggests_sepsis_without_nec f then Sepsis
-  else if suggests_volvulus f then Volvulus
-  else if has_preceding_feeding_intolerance f then NEC
-  else FeedingIntolerance.
-
 (* Differential confidence scoring *)
 Definition nec_confidence (f : DifferentialFeatures) : nat :=
   (if has_pneumatosis f then 5 else 0) +          (* pathognomonic *)
@@ -743,6 +735,16 @@ Definition sip_confidence (f : DifferentialFeatures) : nat :=
   (if negb (has_pneumatosis f) then 2 else 0) +
   (if extremely_preterm f then 2 else 0) +
   (if negb (has_preceding_feeding_intolerance f) then 1 else 0).
+
+Definition most_likely_diagnosis (f : DifferentialFeatures) : GIDifferential :=
+  if has_pneumatosis f then NEC
+  else if suggests_volvulus f then Volvulus
+  else if suggests_sepsis_without_nec f then Sepsis
+  else if sip_confidence f <? nec_confidence f then NEC
+  else if nec_confidence f <? sip_confidence f then SpontaneousIntestinalPerforation
+  else if has_preceding_feeding_intolerance f then NEC
+  else if suggests_sip f then SpontaneousIntestinalPerforation
+  else FeedingIntolerance.
 
 Lemma pneumatosis_implies_nec : forall f,
   has_pneumatosis f = true -> most_likely_diagnosis f = NEC.
