@@ -34,7 +34,8 @@
 (*  7. [DONE] Wire lab-derived acidosis, thrombocytopenia, neutropenia       *)
 (*     into classify_stage via effective_stage2b_sys/effective_stage3_sys.   *)
 (*  8. [DONE] most_likely_diagnosis now uses confidence score comparison.    *)
-(*  9. Relax SIP criteria to allow coexistence with mild NEC signs.          *)
+(*  9. [DONE] SIP now excludes on radiographic NEC (pneumatosis/PVG),       *)
+(*     not mild feeding intolerance.                                         *)
 (* 10. Enforce time ordering on PatientTimeSeries at type level;             *)
 (*     add_observation silently accepts out-of-order insertions.             *)
 (* 11. Fix compute_trajectory for non-monotonic paths; currently             *)
@@ -711,10 +712,12 @@ Record DifferentialFeatures : Type := MkDifferentialFeatures {
 Definition suggests_nec (f : DifferentialFeatures) : bool :=
   has_pneumatosis f || has_portal_venous_gas f || has_preceding_feeding_intolerance f.
 
+(* SIP requires perforation without pathognomonic NEC radiographics.
+   Mild feeding intolerance no longer excludes SIP — common in preterms. *)
 Definition suggests_sip (f : DifferentialFeatures) : bool :=
   has_pneumoperitoneum f &&
   negb (has_pneumatosis f) &&
-  negb (has_preceding_feeding_intolerance f) &&
+  negb (has_portal_venous_gas f) &&
   extremely_preterm f.
 
 Definition suggests_volvulus (f : DifferentialFeatures) : bool :=
@@ -733,8 +736,8 @@ Definition nec_confidence (f : DifferentialFeatures) : nat :=
 Definition sip_confidence (f : DifferentialFeatures) : nat :=
   (if has_pneumoperitoneum f then 3 else 0) +
   (if negb (has_pneumatosis f) then 2 else 0) +
-  (if extremely_preterm f then 2 else 0) +
-  (if negb (has_preceding_feeding_intolerance f) then 1 else 0).
+  (if negb (has_portal_venous_gas f) then 1 else 0) +
+  (if extremely_preterm f then 2 else 0).
 
 Definition most_likely_diagnosis (f : DifferentialFeatures) : GIDifferential :=
   if has_pneumatosis f then NEC
