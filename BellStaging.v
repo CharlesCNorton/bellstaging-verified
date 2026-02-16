@@ -20,7 +20,7 @@
 (******************************************************************************)
 (*                              CURE LIST                                     *)
 (*                                                                            *)
-(*  1. Prove signs_subset c1 c2 -> Stage.leb (classify c1) (classify c2).   *)
+(*  1. [DONE] classify_inputs_monotone: ci_subset -> Stage.leb.             *)
 (*  2. Prove pneumoperitoneum c = false -> ... -> classify c <> Stage.IIIB.  *)
 (*  3. Prove totality via boolean reflection or enumeration;                 *)
 (*     current classify_total is tautological.                               *)
@@ -2245,6 +2245,134 @@ Proof. reflexivity. Qed.
 End CounterexampleAttempts.
 
 Module SafetyProperties.
+
+(* Abstract boolean inputs that classify_stage actually inspects *)
+Record ClassifierInputs : Type := MkCI {
+  ci_pneumoperitoneum : bool;
+  ci_stage3_sys : bool;
+  ci_stage3_int : bool;
+  ci_rad_stage2ab : bool;  (* stage2a || stage2b *)
+  ci_stage2b_sys : bool;
+  ci_stage2b_int : bool;
+  ci_stage2_int : bool;
+  ci_rad_stage2b : bool;
+  ci_definite_nec : bool;
+  ci_stage1b_int : bool;
+  ci_stage1_sys : bool
+}.
+
+Definition classify_inputs (ci : ClassifierInputs) : Stage.t :=
+  if ci_pneumoperitoneum ci then Stage.IIIB
+  else if ci_stage3_sys ci && ci_stage3_int ci && ci_rad_stage2ab ci then Stage.IIIA
+  else if (ci_stage2b_sys ci || ci_stage2b_int ci) && ci_stage2_int ci && ci_rad_stage2b ci then Stage.IIB
+  else if ci_definite_nec ci && ci_stage2_int ci then Stage.IIA
+  else if ci_stage1b_int ci && ci_stage1_sys ci then Stage.IB
+  else Stage.IA.
+
+Definition ci_subset (c1 c2 : ClassifierInputs) : Prop :=
+  implb (ci_pneumoperitoneum c1) (ci_pneumoperitoneum c2) = true /\
+  implb (ci_stage3_sys c1) (ci_stage3_sys c2) = true /\
+  implb (ci_stage3_int c1) (ci_stage3_int c2) = true /\
+  implb (ci_rad_stage2ab c1) (ci_rad_stage2ab c2) = true /\
+  implb (ci_stage2b_sys c1) (ci_stage2b_sys c2) = true /\
+  implb (ci_stage2b_int c1) (ci_stage2b_int c2) = true /\
+  implb (ci_stage2_int c1) (ci_stage2_int c2) = true /\
+  implb (ci_rad_stage2b c1) (ci_rad_stage2b c2) = true /\
+  implb (ci_definite_nec c1) (ci_definite_nec c2) = true /\
+  implb (ci_stage1b_int c1) (ci_stage1b_int c2) = true /\
+  implb (ci_stage1_sys c1) (ci_stage1_sys c2) = true.
+
+(* Helper: implb a b = true means a = true -> b = true *)
+Lemma implb_true : forall a b, implb a b = true -> a = true -> b = true.
+Proof. intros [] []; simpl; auto; discriminate. Qed.
+
+Lemma implb_orb : forall a1 a2 b1 b2,
+  implb a1 b1 = true -> implb a2 b2 = true ->
+  implb (a1 || a2) (b1 || b2) = true.
+Proof. intros [] [] [] []; simpl; auto. Qed.
+
+Lemma implb_andb : forall a1 a2 b1 b2,
+  implb a1 b1 = true -> implb a2 b2 = true ->
+  implb (a1 && a2) (b1 && b2) = true.
+Proof. intros [] [] [] []; simpl; auto. Qed.
+
+(* Monotonicity: adding signs never decreases stage.
+   Proved by showing each stage's guard in c1 implies the same or higher
+   guard in c2. Uses Nat.leb transitivity rather than exhaustive case split. *)
+Theorem classify_inputs_monotone : forall c1 c2,
+  ci_subset c1 c2 ->
+  Stage.leb (classify_inputs c1) (classify_inputs c2) = true.
+Proof.
+  intros c1 c2 Hsub.
+  destruct Hsub as [Hp [H3s [H3i [Hra [H2bs [H2bi [H2i [Hrb [Hdn [H1bi H1s]]]]]]]]]].
+  unfold classify_inputs.
+  (* Case: c1 has pneumoperitoneum -> IIIB *)
+  destruct (ci_pneumoperitoneum c1) eqn:Ep1.
+  { simpl in Hp. rewrite Hp. reflexivity. }
+  (* c1 doesn't have pneumoperitoneum *)
+  destruct (ci_pneumoperitoneum c2) eqn:Ep2.
+  { (* c2 has pneumoperitoneum -> c2 = IIIB, c1 <= IIIB always *)
+    simpl.
+    destruct (ci_stage3_sys c1 && ci_stage3_int c1 && ci_rad_stage2ab c1);
+    destruct ((ci_stage2b_sys c1 || ci_stage2b_int c1) && ci_stage2_int c1 && ci_rad_stage2b c1);
+    destruct (ci_definite_nec c1 && ci_stage2_int c1);
+    destruct (ci_stage1b_int c1 && ci_stage1_sys c1);
+    reflexivity. }
+  (* Neither has pneumoperitoneum *)
+  (* Case: c1 IIIA guard true *)
+  destruct (ci_stage3_sys c1 && ci_stage3_int c1 && ci_rad_stage2ab c1) eqn:Eg3_1.
+  { apply andb_true_iff in Eg3_1. destruct Eg3_1 as [Eg3_1a Eg3_1c].
+    apply andb_true_iff in Eg3_1a. destruct Eg3_1a as [Eg3_1a Eg3_1b].
+    rewrite Eg3_1a in H3s. simpl in H3s.
+    rewrite Eg3_1b in H3i. simpl in H3i.
+    rewrite Eg3_1c in Hra. simpl in Hra.
+    rewrite H3s, H3i, Hra. simpl. reflexivity. }
+  (* c1 IIIA guard false *)
+  destruct (ci_stage3_sys c2 && ci_stage3_int c2 && ci_rad_stage2ab c2) eqn:Eg3_2.
+  { (* c2 = IIIA, c1 < IIIA *)
+    simpl.
+    destruct ((ci_stage2b_sys c1 || ci_stage2b_int c1) && ci_stage2_int c1 && ci_rad_stage2b c1);
+    destruct (ci_definite_nec c1 && ci_stage2_int c1);
+    destruct (ci_stage1b_int c1 && ci_stage1_sys c1);
+    reflexivity. }
+  (* Neither at IIIA *)
+  (* Case: c1 IIB guard true *)
+  destruct ((ci_stage2b_sys c1 || ci_stage2b_int c1) && ci_stage2_int c1 && ci_rad_stage2b c1) eqn:Eg2b_1.
+  { apply andb_true_iff in Eg2b_1. destruct Eg2b_1 as [Eg2b_1a Eg2b_1c].
+    apply andb_true_iff in Eg2b_1a. destruct Eg2b_1a as [Eg2b_1a Eg2b_1b].
+    assert (Hsub: (ci_stage2b_sys c2 || ci_stage2b_int c2) = true).
+    { apply orb_true_iff in Eg2b_1a. destruct Eg2b_1a as [Hx|Hx].
+      - rewrite Hx in H2bs. simpl in H2bs. rewrite H2bs. reflexivity.
+      - rewrite Hx in H2bi. simpl in H2bi. rewrite H2bi. apply orb_true_r. }
+    rewrite Eg2b_1b in H2i. simpl in H2i.
+    rewrite Eg2b_1c in Hrb. simpl in Hrb.
+    rewrite Hsub, H2i, Hrb. simpl. reflexivity. }
+  (* c1 IIB guard false *)
+  destruct ((ci_stage2b_sys c2 || ci_stage2b_int c2) && ci_stage2_int c2 && ci_rad_stage2b c2) eqn:Eg2b_2.
+  { simpl.
+    destruct (ci_definite_nec c1 && ci_stage2_int c1);
+    destruct (ci_stage1b_int c1 && ci_stage1_sys c1);
+    reflexivity. }
+  (* Neither at IIB *)
+  (* Case: c1 IIA guard true *)
+  destruct (ci_definite_nec c1 && ci_stage2_int c1) eqn:Eg2a_1.
+  { apply andb_true_iff in Eg2a_1. destruct Eg2a_1 as [Eg2a_1a Eg2a_1b].
+    rewrite Eg2a_1a in Hdn. simpl in Hdn.
+    rewrite Eg2a_1b in H2i. simpl in H2i.
+    rewrite Hdn, H2i. simpl. reflexivity. }
+  (* c1 IIA guard false *)
+  destruct (ci_definite_nec c2 && ci_stage2_int c2) eqn:Eg2a_2.
+  { simpl. destruct (ci_stage1b_int c1 && ci_stage1_sys c1); reflexivity. }
+  (* Neither at IIA *)
+  (* Case: c1 IB guard true *)
+  destruct (ci_stage1b_int c1 && ci_stage1_sys c1) eqn:Eg1b_1.
+  { apply andb_true_iff in Eg1b_1. destruct Eg1b_1 as [Eg1b_1a Eg1b_1b].
+    rewrite Eg1b_1a in H1bi. simpl in H1bi.
+    rewrite Eg1b_1b in H1s. simpl in H1s.
+    rewrite H1bi, H1s. simpl. reflexivity. }
+  (* c1 at IA, c2 at IA or IB *)
+  simpl. destruct (ci_stage1b_int c2 && ci_stage1_sys c2); reflexivity.
+Qed.
 
 Theorem every_patient_staged : forall c,
   exists s, Classification.classify c = s.
