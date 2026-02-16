@@ -23,7 +23,7 @@
 (*  1. [DONE] classify_inputs_monotone: ci_subset -> Stage.leb.             *)
 (*  2. [DONE] no_perforation_not_IIIB proved.                                *)
 (*  3. [DONE] classify_total_reflected: 6-way disjunction on output.         *)
-(*  4. Prove each stage has witness and witnesses span all stages.           *)
+(*  4. [DONE] classify_surjective: every stage has a witness.               *)
 (*  5. Define valid_transition as inductive relation with eauto hints.       *)
 (*  6. Add Stabilization -> SurgicalEvaluation to valid transitions.         *)
 (*  7. Replace prognosis nat with record { low; mid; high }.                 *)
@@ -2460,6 +2460,25 @@ Proof.
         -- destruct ((_ && _)%bool).
            ++ right. left. reflexivity.
            ++ left. reflexivity.
+Qed.
+
+(* Surjectivity: every stage is reachable by some clinical state *)
+Theorem classify_surjective : forall s : Stage.t,
+  exists c : ClinicalState.t, Classification.classify c = s.
+Proof.
+  intros s. destruct s.
+  - exists WitnessExamples.stage_IA_witness.
+    exact WitnessExamples.stage_IA_witness_classifies_correctly.
+  - exists WitnessExamples.stage_IB_witness.
+    exact WitnessExamples.stage_IB_witness_classifies_correctly.
+  - exists WitnessExamples.stage_IIA_witness.
+    exact WitnessExamples.stage_IIA_witness_classifies_correctly.
+  - exists WitnessExamples.stage_IIB_witness.
+    exact WitnessExamples.stage_IIB_witness_classifies_correctly.
+  - exists WitnessExamples.stage_IIIA_witness.
+    exact WitnessExamples.stage_IIIA_witness_classifies_correctly.
+  - exists WitnessExamples.stage_IIIB_witness.
+    exact WitnessExamples.stage_IIIB_witness_classifies_correctly.
 Qed.
 
 (* Stage enumeration is complete - every nat 1-6 corresponds to a stage *)
