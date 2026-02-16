@@ -28,7 +28,8 @@
 (*  4. [DONE] Deleted Diagnosis.requires_surgery (dead code);                *)
 (*     Treatment.requires_surgery and SurgicalIndications.surgery_indicated  *)
 (*     are the two canonical predicates.                                     *)
-(*  5. Wire VitalSigns.hypotension into SystemicSigns.                       *)
+(*  5. [DONE] Wire VitalSigns.hypotension into classify_stage via            *)
+(*     effective_hypotension (MAP < GA weeks when vitals available).          *)
 (*  6. Route ClinicalState.has_dic into classify_stage.                      *)
 (*  7. Wire LabValues, NeonatalOrganFailure, and Microbiology into           *)
 (*     classify_stage; ~60% of clinical data model is dead code.             *)
@@ -1311,6 +1312,7 @@ Record t : Type := MkClinicalState {
   labs : option LabValues.t;
   coag : option CoagulationPanel.t;
   micro : Microbiology.t;
+  vitals : option VitalSigns.t;
   systemic : SystemicSigns.t;
   intestinal : IntestinalSigns.t;
   radiographic : RadiographicSigns.t;
@@ -1330,12 +1332,15 @@ Definition default_coag : CoagulationPanel.t :=
 Definition default_micro : Microbiology.t :=
   Microbiology.none.
 
+Definition default_vitals : VitalSigns.t := VitalSigns.normal.
+
 Definition empty : t :=
   MkClinicalState
     default_risk_factors
     (Some default_labs)
     (Some default_coag)
     default_micro
+    (Some default_vitals)
     SystemicSigns.none
     IntestinalSigns.none
     RadiographicSigns.none
@@ -1365,6 +1370,14 @@ Definition has_dic (c : t) : bool :=
         (LabValues.severe_thrombocytopenia l)
         (LabValues.elevated_lactate l)
   | _, _ => false
+  end.
+
+(* Effective hypotension: vitals-derived (MAP < GA weeks) when available,
+   otherwise falls back to SystemicSigns.hypotension bool *)
+Definition effective_hypotension (c : t) : bool :=
+  match vitals c with
+  | Some v => VitalSigns.hypotension v (RiskFactors.gestational_age_weeks (risk_factors c))
+  | None => SystemicSigns.hypotension (systemic c)
   end.
 
 Definition has_positive_blood_culture (c : t) : bool :=
@@ -1637,8 +1650,9 @@ Definition classify_stage (c : ClinicalState.t) : Stage.t :=
   let sys := ClinicalState.systemic c in
   let int := ClinicalState.intestinal c in
   let rad := ClinicalState.radiographic c in
+  let effective_stage3_sys := SystemicSigns.stage3_signs sys || ClinicalState.effective_hypotension c in
   if RadiographicSigns.pneumoperitoneum rad then Stage.IIIB
-  else if SystemicSigns.stage3_signs sys && IntestinalSigns.stage3_signs int && (RadiographicSigns.stage2a_findings rad || RadiographicSigns.stage2b_findings rad) then Stage.IIIA
+  else if effective_stage3_sys && IntestinalSigns.stage3_signs int && (RadiographicSigns.stage2a_findings rad || RadiographicSigns.stage2b_findings rad) then Stage.IIIA
   else if (SystemicSigns.stage2b_signs sys || IntestinalSigns.stage2b_signs int) && IntestinalSigns.stage2_signs int && RadiographicSigns.stage2b_findings rad then Stage.IIB
   else if RadiographicSigns.definite_nec_findings rad && IntestinalSigns.stage2_signs int then Stage.IIA
   else if IntestinalSigns.stage1b_signs int && SystemicSigns.stage1_signs sys then Stage.IB
@@ -1924,6 +1938,7 @@ Definition stage_IIA_witness : ClinicalState.t :=
     (Some abnormal_labs)
     (Some ClinicalState.default_coag)
     ClinicalState.default_micro
+    None
     stage_IIA_witness_systemic
     stage_IIA_witness_intestinal
     stage_IIA_witness_radiographic
@@ -1946,6 +1961,7 @@ Definition stage_IIIB_witness : ClinicalState.t :=
     (Some abnormal_labs)
     (Some ClinicalState.default_coag)
     ClinicalState.default_micro
+    None
     SystemicSigns.none
     IntestinalSigns.none
     stage_IIIB_witness_radiographic
@@ -1971,6 +1987,7 @@ Definition stage_IA_witness : ClinicalState.t :=
     (Some ClinicalState.default_labs)
     (Some ClinicalState.default_coag)
     ClinicalState.default_micro
+    None
     stage_IA_witness_systemic
     stage_IA_witness_intestinal
     RadiographicSigns.none
@@ -1992,6 +2009,7 @@ Definition stage_IB_witness : ClinicalState.t :=
     (Some ClinicalState.default_labs)
     (Some ClinicalState.default_coag)
     ClinicalState.default_micro
+    None
     stage_IB_witness_systemic
     stage_IB_witness_intestinal
     RadiographicSigns.none
@@ -2016,6 +2034,7 @@ Definition stage_IIB_witness : ClinicalState.t :=
     (Some abnormal_labs)
     (Some ClinicalState.default_coag)
     ClinicalState.default_micro
+    None
     stage_IIB_witness_systemic
     stage_IIB_witness_intestinal
     stage_IIB_witness_radiographic
@@ -2040,6 +2059,7 @@ Definition stage_IIIA_witness : ClinicalState.t :=
     (Some abnormal_labs)
     (Some ClinicalState.default_coag)
     ClinicalState.default_micro
+    None
     stage_IIIA_witness_systemic
     stage_IIIA_witness_intestinal
     stage_IIIA_witness_radiographic
@@ -2125,6 +2145,7 @@ Definition systemic_only : ClinicalState.t :=
     (Some ClinicalState.default_labs)
     (Some ClinicalState.default_coag)
     ClinicalState.default_micro
+    None
     (SystemicSigns.MkSystemicSigns true true true true true true true true true true)
     IntestinalSigns.none
     RadiographicSigns.none
@@ -2140,6 +2161,7 @@ Definition term_infant_low_risk : ClinicalState.t :=
     (Some ClinicalState.default_labs)
     (Some ClinicalState.default_coag)
     ClinicalState.default_micro
+    None
     SystemicSigns.none
     IntestinalSigns.none
     RadiographicSigns.none
@@ -2162,6 +2184,7 @@ Definition isolated_perforation : ClinicalState.t :=
     (Some ClinicalState.default_labs)
     (Some ClinicalState.default_coag)
     ClinicalState.default_micro
+    None
     SystemicSigns.none
     IntestinalSigns.none
     isolated_perforation_radiographic
