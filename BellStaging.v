@@ -36,8 +36,7 @@
 (*  8. [DONE] most_likely_diagnosis now uses confidence score comparison.    *)
 (*  9. [DONE] SIP now excludes on radiographic NEC (pneumatosis/PVG),       *)
 (*     not mild feeding intolerance.                                         *)
-(* 10. Enforce time ordering on PatientTimeSeries at type level;             *)
-(*     add_observation silently accepts out-of-order insertions.             *)
+(* 10. [DONE] add_observation returns option, rejects out-of-order.          *)
 (* 11. Fix compute_trajectory for non-monotonic paths; currently             *)
 (*     compares only endpoints (spike to IIIA then drop to IIA = Worsening).*)
 (* 12. Unify RapidDeterioration thresholds between TemporalProgression       *)
@@ -1605,9 +1604,14 @@ Definition time_to_stage (ts : PatientTimeSeries) (threshold : nat) : option nat
   | _, _ => None
   end.
 
-(* Add observation to time series (maintains time ordering) *)
-Definition add_observation (obs : Observation) (ts : PatientTimeSeries) : PatientTimeSeries :=
-  obs :: ts.
+(* Add observation to time series; rejects if out of order (newest first) *)
+Definition add_observation (obs : Observation) (ts : PatientTimeSeries) : option PatientTimeSeries :=
+  match ts with
+  | [] => Some [obs]
+  | prev :: _ =>
+      if obs_time_hours prev <=? obs_time_hours obs then Some (obs :: ts)
+      else None
+  end.
 
 (* Proofs about time series properties *)
 
