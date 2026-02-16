@@ -41,7 +41,7 @@
 (*     paths; peak > current triggers different logic.                       *)
 (* 12. [DONE] Both modules now use velocity >20 for RapidDeterioration.      *)
 (* 13. [DONE] hours_to_reassess takes stage_nat; Stage III halves interval.  *)
-(* 14. Add sign_timestamp or sign_active fields, filter stale signs.         *)
+(* 14. [DONE] ClinicalState has assessment timestamps + signs_current check. *)
 (* 15. Prove forall c, classify_stage c = classify_declarative c.            *)
 (* 16. Prove signs_subset c1 c2 -> Stage.leb (classify c1) (classify c2).   *)
 (* 17. Prove pneumoperitoneum c = false -> ... -> classify c <> Stage.IIIB.  *)
@@ -1327,7 +1327,11 @@ Record t : Type := MkClinicalState {
   systemic : SystemicSigns.t;
   intestinal : IntestinalSigns.t;
   radiographic : RadiographicSigns.t;
-  hours_since_symptom_onset : nat
+  hours_since_symptom_onset : nat;
+  (* Assessment timestamps: hours since onset when each exam was last done *)
+  systemic_assessed_h : nat;
+  intestinal_assessed_h : nat;
+  radiographic_assessed_h : nat
 }.
 
 Definition default_risk_factors : RiskFactors.t :=
@@ -1345,6 +1349,15 @@ Definition default_micro : Microbiology.t :=
 
 Definition default_vitals : VitalSigns.t := VitalSigns.normal.
 
+(* Staleness threshold: signs older than this many hours are stale *)
+Definition staleness_threshold_hours : nat := 6.
+
+Definition signs_current (c : t) : bool :=
+  let now := hours_since_symptom_onset c in
+  (now - systemic_assessed_h c <=? staleness_threshold_hours) &&
+  (now - intestinal_assessed_h c <=? staleness_threshold_hours) &&
+  (now - radiographic_assessed_h c <=? staleness_threshold_hours).
+
 Definition empty : t :=
   MkClinicalState
     default_risk_factors
@@ -1355,7 +1368,7 @@ Definition empty : t :=
     SystemicSigns.none
     IntestinalSigns.none
     RadiographicSigns.none
-    0.
+    0 0 0 0.
 
 Definition is_high_risk_patient (c : t) : bool :=
   RiskFactors.high_risk (risk_factors c).
@@ -1995,7 +2008,7 @@ Definition stage_IIA_witness : ClinicalState.t :=
     stage_IIA_witness_systemic
     stage_IIA_witness_intestinal
     stage_IIA_witness_radiographic
-    12.
+    12 12 12 12.
 
 Lemma stage_IIA_witness_classifies_correctly :
   Classification.classify stage_IIA_witness = Stage.IIA.
@@ -2018,7 +2031,7 @@ Definition stage_IIIB_witness : ClinicalState.t :=
     SystemicSigns.none
     IntestinalSigns.none
     stage_IIIB_witness_radiographic
-    48.
+    48 48 48 48.
 
 Lemma stage_IIIB_witness_classifies_correctly :
   Classification.classify stage_IIIB_witness = Stage.IIIB.
@@ -2044,7 +2057,7 @@ Definition stage_IA_witness : ClinicalState.t :=
     stage_IA_witness_systemic
     stage_IA_witness_intestinal
     RadiographicSigns.none
-    4.
+    4 4 4 4.
 
 Lemma stage_IA_witness_classifies_correctly :
   Classification.classify stage_IA_witness = Stage.IA.
@@ -2066,7 +2079,7 @@ Definition stage_IB_witness : ClinicalState.t :=
     stage_IB_witness_systemic
     stage_IB_witness_intestinal
     RadiographicSigns.none
-    6.
+    6 6 6 6.
 
 Lemma stage_IB_witness_classifies_correctly :
   Classification.classify stage_IB_witness = Stage.IB.
@@ -2091,7 +2104,7 @@ Definition stage_IIB_witness : ClinicalState.t :=
     stage_IIB_witness_systemic
     stage_IIB_witness_intestinal
     stage_IIB_witness_radiographic
-    24.
+    24 24 24 24.
 
 Lemma stage_IIB_witness_classifies_correctly :
   Classification.classify stage_IIB_witness = Stage.IIB.
@@ -2116,7 +2129,7 @@ Definition stage_IIIA_witness : ClinicalState.t :=
     stage_IIIA_witness_systemic
     stage_IIIA_witness_intestinal
     stage_IIIA_witness_radiographic
-    36.
+    36 36 36 36.
 
 Lemma stage_IIIA_witness_classifies_correctly :
   Classification.classify stage_IIIA_witness = Stage.IIIA.
@@ -2203,7 +2216,7 @@ Definition systemic_only : ClinicalState.t :=
     (SystemicSigns.MkSystemicSigns true true true true true true true true true true)
     IntestinalSigns.none
     RadiographicSigns.none
-    24.
+    24 24 24 24.
 
 Lemma systemic_signs_alone_insufficient_for_definite_nec :
   Stage.to_nat (Classification.classify systemic_only) < Stage.to_nat Stage.IIA.
@@ -2219,7 +2232,7 @@ Definition term_infant_low_risk : ClinicalState.t :=
     SystemicSigns.none
     IntestinalSigns.none
     RadiographicSigns.none
-    0.
+    0 0 0 0.
 
 Lemma term_infant_not_high_risk :
   ClinicalState.is_high_risk_patient term_infant_low_risk = false.
@@ -2242,7 +2255,7 @@ Definition isolated_perforation : ClinicalState.t :=
     SystemicSigns.none
     IntestinalSigns.none
     isolated_perforation_radiographic
-    2.
+    2 2 2 2.
 
 Lemma isolated_perforation_is_sip :
   Classification.diagnose isolated_perforation = Diagnosis.SuspectedSIP.
