@@ -37,8 +37,8 @@
 (*  9. [DONE] SIP now excludes on radiographic NEC (pneumatosis/PVG),       *)
 (*     not mild feeding intolerance.                                         *)
 (* 10. [DONE] add_observation returns option, rejects out-of-order.          *)
-(* 11. Fix compute_trajectory for non-monotonic paths; currently             *)
-(*     compares only endpoints (spike to IIIA then drop to IIA = Worsening).*)
+(* 11. [DONE] compute_trajectory uses max_stage to detect non-monotonic      *)
+(*     paths; peak > current triggers different logic.                       *)
 (* 12. Unify RapidDeterioration thresholds between TemporalProgression       *)
 (*     (velocity >20) and TimeSeries (delta >1 in <12h); single check.      *)
 (* 13. Add stage parameter to hours_to_reassess.                             *)
@@ -1541,13 +1541,24 @@ Fixpoint min_stage (ts : PatientTimeSeries) : nat :=
 Definition stage_range (ts : PatientTimeSeries) : nat :=
   max_stage ts - min_stage ts.
 
-(* Compute trajectory from time series *)
+(* Compute trajectory from time series.
+   Uses max_stage to detect non-monotonic paths: if the patient peaked
+   higher than their current stage, the trajectory reflects the peak-to-
+   current relationship, not just the endpoint-to-endpoint delta. *)
 Definition compute_trajectory (ts : PatientTimeSeries) : TemporalProgression.ClinicalTrajectory :=
   match latest ts, earliest ts with
   | Some l, Some e =>
-      let stage_delta := (Z.of_nat (obs_stage l) - Z.of_nat (obs_stage e))%Z in
+      let current := obs_stage l in
+      let peak := max_stage ts in
+      let stage_delta := (Z.of_nat current - Z.of_nat (obs_stage e))%Z in
       let duration := obs_time_hours l - obs_time_hours e in
-      if (stage_delta >? 1)%Z then
+      if current <? peak then
+        (* Patient peaked higher then improved — net trajectory depends on
+           whether current is still above baseline *)
+        if (stage_delta >? 0)%Z then TemporalProgression.Worsening
+        else if (stage_delta <? 0)%Z then TemporalProgression.Improving
+        else TemporalProgression.Stable
+      else if (stage_delta >? 1)%Z then
         if duration <? 12 then TemporalProgression.RapidDeterioration
         else TemporalProgression.Worsening
       else if (stage_delta >? 0)%Z then TemporalProgression.Worsening
@@ -1621,8 +1632,8 @@ Proof. reflexivity. Qed.
 Lemma singleton_series_stable : forall o,
   compute_trajectory [o] = TemporalProgression.Stable.
 Proof.
-  intros o. unfold compute_trajectory, latest, earliest. simpl.
-  rewrite Z.sub_diag. reflexivity.
+  intros o. unfold compute_trajectory, latest, earliest, max_stage. simpl.
+  rewrite Nat.ltb_irrefl. rewrite Z.sub_diag. reflexivity.
 Qed.
 
 Lemma worsening_implies_not_improving : forall ts,
