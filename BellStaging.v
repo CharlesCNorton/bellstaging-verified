@@ -25,8 +25,9 @@
 (*  1. [DONE] Consolidate classify_stage IIB into single canonical form.     *)
 (*  2. [DONE] Align IIIA radiographic axis between both classifiers.         *)
 (*  3. [DONE] Deleted classify_canonical alias.                              *)
-(*  4. Unify SurgicalIndications.surgery_indicated with                      *)
-(*     Diagnosis.requires_surgery; they currently disagree.                  *)
+(*  4. [DONE] Deleted Diagnosis.requires_surgery (dead code);                *)
+(*     Treatment.requires_surgery and SurgicalIndications.surgery_indicated  *)
+(*     are the two canonical predicates.                                     *)
 (*  5. Wire VitalSigns.hypotension into SystemicSigns.                       *)
 (*  6. Route ClinicalState.has_dic into classify_stage.                      *)
 (*  7. Wire LabValues, NeonatalOrganFailure, and Microbiology into           *)
@@ -1173,13 +1174,6 @@ Definition stage_of (d : t) : option Stage.t :=
 Definition is_confirmed (d : t) : bool :=
   match d with
   | ConfirmedNEC _ => true
-  | _ => false
-  end.
-
-Definition requires_surgery (d : t) : bool :=
-  match d with
-  | SuspectedSIP => true
-  | ConfirmedNEC Stage.IIIB => true
   | _ => false
   end.
 
