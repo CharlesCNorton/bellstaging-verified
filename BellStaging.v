@@ -22,8 +22,7 @@
 (*                                                                            *)
 (*  1. [DONE] classify_inputs_monotone: ci_subset -> Stage.leb.             *)
 (*  2. [DONE] no_perforation_not_IIIB proved.                                *)
-(*  3. Prove totality via boolean reflection or enumeration;                 *)
-(*     current classify_total is tautological.                               *)
+(*  3. [DONE] classify_total_reflected: 6-way disjunction on output.         *)
 (*  4. Prove each stage has witness and witnesses span all stages.           *)
 (*  5. Define valid_transition as inductive relation with eauto hints.       *)
 (*  6. Add Stabilization -> SurgicalEvaluation to valid transitions.         *)
@@ -2438,10 +2437,29 @@ Proof.
 Qed.
 
 (* Completeness: classify is total and deterministic *)
-Theorem classify_total : forall c : ClinicalState.t,
-  { s : Stage.t | Classification.classify c = s }.
+(* Totality via boolean reflection: classify always lands in one of
+   six cases, and we can decide which computationally. *)
+Theorem classify_total_reflected : forall c : ClinicalState.t,
+  Classification.classify c = Stage.IA \/
+  Classification.classify c = Stage.IB \/
+  Classification.classify c = Stage.IIA \/
+  Classification.classify c = Stage.IIB \/
+  Classification.classify c = Stage.IIIA \/
+  Classification.classify c = Stage.IIIB.
 Proof.
-  intros c. exists (Classification.classify c). reflexivity.
+  intros c.
+  unfold Classification.classify, Classification.classify_stage.
+  destruct (RadiographicSigns.pneumoperitoneum _).
+  - right. right. right. right. right. reflexivity.
+  - destruct ((_ && _ && _)%bool).
+    + right. right. right. right. left. reflexivity.
+    + destruct ((_ && _ && _)%bool).
+      * right. right. right. left. reflexivity.
+      * destruct ((_ && _)%bool).
+        -- right. right. left. reflexivity.
+        -- destruct ((_ && _)%bool).
+           ++ right. left. reflexivity.
+           ++ left. reflexivity.
 Qed.
 
 (* Stage enumeration is complete - every nat 1-6 corresponds to a stage *)
