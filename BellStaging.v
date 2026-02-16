@@ -23,7 +23,7 @@
 (*  Sequenced so each item depends only on earlier ones.                     *)
 (*                                                                            *)
 (*  1. [DONE] Consolidate classify_stage IIB into single canonical form.     *)
-(*  2. Align IIIA criteria between classify_stage and classify_declarative.  *)
+(*  2. [DONE] Align IIIA radiographic axis between both classifiers.         *)
 (*  3. Kill classify_canonical alias; three names for two functions.         *)
 (*  4. Unify SurgicalIndications.surgery_indicated with                      *)
 (*     Diagnosis.requires_surgery; they currently disagree.                  *)
@@ -1644,7 +1644,7 @@ Definition classify_stage (c : ClinicalState.t) : Stage.t :=
   let int := ClinicalState.intestinal c in
   let rad := ClinicalState.radiographic c in
   if RadiographicSigns.pneumoperitoneum rad then Stage.IIIB
-  else if SystemicSigns.stage3_signs sys && IntestinalSigns.stage3_signs int && RadiographicSigns.stage2b_findings rad then Stage.IIIA
+  else if SystemicSigns.stage3_signs sys && IntestinalSigns.stage3_signs int && (RadiographicSigns.stage2a_findings rad || RadiographicSigns.stage2b_findings rad) then Stage.IIIA
   else if (SystemicSigns.stage2b_signs sys || IntestinalSigns.stage2b_signs int) && IntestinalSigns.stage2_signs int && RadiographicSigns.stage2b_findings rad then Stage.IIB
   else if RadiographicSigns.definite_nec_findings rad && IntestinalSigns.stage2_signs int then Stage.IIA
   else if IntestinalSigns.stage1b_signs int && SystemicSigns.stage1_signs sys then Stage.IB
