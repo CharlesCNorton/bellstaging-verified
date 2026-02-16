@@ -31,8 +31,8 @@
 (*  5. [DONE] Wire VitalSigns.hypotension into classify_stage via            *)
 (*     effective_hypotension (MAP < GA weeks when vitals available).          *)
 (*  6. [DONE] Route ClinicalState.has_dic into effective_stage3_sys.          *)
-(*  7. Wire LabValues, NeonatalOrganFailure, and Microbiology into           *)
-(*     classify_stage; ~60% of clinical data model is dead code.             *)
+(*  7. [DONE] Wire lab-derived acidosis, thrombocytopenia, neutropenia       *)
+(*     into classify_stage via effective_stage2b_sys/effective_stage3_sys.   *)
 (*  8. Use nec_confidence/sip_confidence in most_likely_diagnosis.           *)
 (*  9. Relax SIP criteria to allow coexistence with mild NEC signs.          *)
 (* 10. Enforce time ordering on PatientTimeSeries at type level;             *)
@@ -1386,6 +1386,25 @@ Definition has_positive_blood_culture (c : t) : bool :=
 Definition has_gram_negative_sepsis (c : t) : bool :=
   Microbiology.gram_negative_sepsis (micro c).
 
+(* Lab-derived systemic sign equivalents for classify_stage *)
+Definition lab_metabolic_acidosis (c : t) : bool :=
+  match labs c with
+  | Some l => LabValues.metabolic_acidosis l
+  | None => false
+  end.
+
+Definition lab_thrombocytopenia (c : t) : bool :=
+  match labs c with
+  | Some l => LabValues.thrombocytopenia l
+  | None => false
+  end.
+
+Definition lab_neutropenia (c : t) : bool :=
+  match labs c with
+  | Some l => LabValues.neutropenia l
+  | None => false
+  end.
+
 Definition overall_severity_score (c : t) : nat :=
   RiskFactors.risk_score (risk_factors c) +
   (match labs c with Some l => LabValues.lab_severity_score l | None => 0 end) +
@@ -1650,10 +1669,16 @@ Definition classify_stage (c : ClinicalState.t) : Stage.t :=
   let sys := ClinicalState.systemic c in
   let int := ClinicalState.intestinal c in
   let rad := ClinicalState.radiographic c in
-  let effective_stage3_sys := SystemicSigns.stage3_signs sys || ClinicalState.effective_hypotension c || ClinicalState.has_dic c in
+  let effective_stage3_sys := SystemicSigns.stage3_signs sys
+    || ClinicalState.effective_hypotension c
+    || ClinicalState.has_dic c
+    || ClinicalState.lab_neutropenia c in
+  let effective_stage2b_sys := SystemicSigns.stage2b_signs sys
+    || ClinicalState.lab_metabolic_acidosis c
+    || ClinicalState.lab_thrombocytopenia c in
   if RadiographicSigns.pneumoperitoneum rad then Stage.IIIB
   else if effective_stage3_sys && IntestinalSigns.stage3_signs int && (RadiographicSigns.stage2a_findings rad || RadiographicSigns.stage2b_findings rad) then Stage.IIIA
-  else if (SystemicSigns.stage2b_signs sys || IntestinalSigns.stage2b_signs int) && IntestinalSigns.stage2_signs int && RadiographicSigns.stage2b_findings rad then Stage.IIB
+  else if (effective_stage2b_sys || IntestinalSigns.stage2b_signs int) && IntestinalSigns.stage2_signs int && RadiographicSigns.stage2b_findings rad then Stage.IIB
   else if RadiographicSigns.definite_nec_findings rad && IntestinalSigns.stage2_signs int then Stage.IIA
   else if IntestinalSigns.stage1b_signs int && SystemicSigns.stage1_signs sys then Stage.IB
   else Stage.IA.
