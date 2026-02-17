@@ -1026,6 +1026,29 @@ Lemma stage_IIIB_requires_14_days_npo :
   npo_duration_by_stage 6 = 14.
 Proof. reflexivity. Qed.
 
+(* Refeeding safety: during active NEC (stage >= IIA, i.e., stage_nat >= 3),
+   feeds cannot restart until the NPO period has elapsed. At diagnosis
+   (days_npo = 0), can_restart_feeds is always false. *)
+Lemma no_refeeding_during_active_nec : forall stage_nat,
+  3 <= stage_nat -> stage_nat <= 6 ->
+  can_restart_feeds stage_nat 0 true true = false.
+Proof.
+  intros [|[|[|[|[|[|[|n]]]]]]]; intros H1 H2;
+  try lia; vm_compute; reflexivity.
+Qed.
+
+(* Stronger: feeds cannot restart until at least npo_duration days have passed *)
+Lemma refeeding_requires_npo_elapsed : forall stage_nat days exam resid,
+  can_restart_feeds stage_nat days exam resid = true ->
+  npo_duration_by_stage stage_nat <= days.
+Proof.
+  intros stage_nat days exam resid H.
+  unfold can_restart_feeds in H.
+  apply andb_true_iff in H. destruct H as [H1 _].
+  apply andb_true_iff in H1. destruct H1 as [H1 _].
+  apply Nat.leb_le in H1. exact H1.
+Qed.
+
 End FeedingProtocol.
 
 Module TemporalProgression.
