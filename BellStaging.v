@@ -2022,6 +2022,27 @@ Definition urgency_from_trajectory (traj : TemporalProgression.ClinicalTrajector
   | TemporalProgression.Improving, _ => Routine
   end.
 
+(* Organ-failure-modified urgency: multiorgan dysfunction escalates urgency *)
+Definition urgency_with_organ_failure
+    (base_urgency : UrgencyLevel)
+    (organ_assessment : NeonatalOrganFailure.OrganFailureAssessment) : UrgencyLevel :=
+  if NeonatalOrganFailure.multiorgan_dysfunction organ_assessment then
+    match base_urgency with
+    | Routine => Elevated
+    | Elevated => Urgent
+    | Urgent => Emergent
+    | Emergent => Emergent
+    end
+  else base_urgency.
+
+Lemma mods_escalates_urgency : forall u oa,
+  NeonatalOrganFailure.multiorgan_dysfunction oa = true ->
+  urgency_with_organ_failure u oa <> Routine.
+Proof.
+  intros u oa Hmods. unfold urgency_with_organ_failure.
+  rewrite Hmods. destruct u; discriminate.
+Qed.
+
 (* Classify with trajectory context *)
 Record TrajectoryAwareClassification : Type := MkTrajectoryAware {
   tac_stage : Stage.t;
