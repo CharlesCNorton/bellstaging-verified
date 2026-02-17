@@ -1113,10 +1113,29 @@ Definition stage_velocity_x10 (delta : TemporalDelta) : Z :=
 Definition is_rapid_deterioration (delta : TemporalDelta) : bool :=
   (stage_velocity_x10 delta >? 20)%Z.
 
-Definition valid_transition (from to : ManagementPhase) : bool :=
+(* Valid transitions as inductive relation *)
+Inductive valid_transition : ManagementPhase -> ManagementPhase -> Prop :=
+  | vt_recog_stab : valid_transition Recognition Stabilization
+  | vt_stab_active : valid_transition Stabilization ActiveTreatment
+  | vt_stab_surg : valid_transition Stabilization SurgicalEvaluation
+  | vt_active_surg : valid_transition ActiveTreatment SurgicalEvaluation
+  | vt_active_recov : valid_transition ActiveTreatment Recovery
+  | vt_active_death : valid_transition ActiveTreatment Death
+  | vt_surg_post : valid_transition SurgicalEvaluation PostOperative
+  | vt_surg_active : valid_transition SurgicalEvaluation ActiveTreatment
+  | vt_surg_death : valid_transition SurgicalEvaluation Death
+  | vt_post_recov : valid_transition PostOperative Recovery
+  | vt_post_death : valid_transition PostOperative Death
+  | vt_recov_resolved : valid_transition Recovery Resolved
+  | vt_refl : forall p, valid_transition p p.
+
+#[export] Hint Constructors valid_transition : transitions.
+
+Definition valid_transition_b (from to : ManagementPhase) : bool :=
   match from, to with
   | Recognition, Stabilization => true
   | Stabilization, ActiveTreatment => true
+  | Stabilization, SurgicalEvaluation => true
   | ActiveTreatment, SurgicalEvaluation => true
   | ActiveTreatment, Recovery => true
   | ActiveTreatment, Death => true
@@ -1128,6 +1147,14 @@ Definition valid_transition (from to : ManagementPhase) : bool :=
   | Recovery, Resolved => true
   | p1, p2 => phase_to_nat p1 =? phase_to_nat p2
   end.
+
+Lemma valid_transition_b_sound : forall p1 p2,
+  valid_transition_b p1 p2 = true -> valid_transition p1 p2.
+Proof.
+  intros p1 p2 H.
+  destruct p1; destruct p2; simpl in H; try discriminate;
+  try constructor.
+Qed.
 
 Definition deterioration_triggers_escalation (t : ClinicalTrajectory) : bool :=
   match t with
@@ -1157,8 +1184,12 @@ Lemma rapid_deterioration_frequent_reassess :
 Proof. reflexivity. Qed.
 
 Lemma transition_recognition_to_stabilization :
-  valid_transition Recognition Stabilization = true.
-Proof. reflexivity. Qed.
+  valid_transition Recognition Stabilization.
+Proof. constructor. Qed.
+
+Lemma transition_stabilization_to_surgical :
+  valid_transition Stabilization SurgicalEvaluation.
+Proof. constructor. Qed.
 
 Definition is_terminal_phase (p : ManagementPhase) : bool :=
   match p with
@@ -1171,36 +1202,38 @@ Definition is_terminal_phase (p : ManagementPhase) : bool :=
 Inductive reachable : ManagementPhase -> ManagementPhase -> Prop :=
   | reach_refl : forall p, reachable p p
   | reach_step : forall p1 p2 p3,
-      valid_transition p1 p2 = true ->
+      valid_transition p1 p2 ->
       reachable p2 p3 ->
       reachable p1 p3.
+
+#[export] Hint Constructors reachable : transitions.
 
 (* Key reachability proofs *)
 Lemma recognition_reaches_resolved :
   reachable Recognition Resolved.
 Proof.
-  apply reach_step with Stabilization. reflexivity.
-  apply reach_step with ActiveTreatment. reflexivity.
-  apply reach_step with Recovery. reflexivity.
-  apply reach_step with Resolved. reflexivity.
+  apply reach_step with Stabilization. constructor.
+  apply reach_step with ActiveTreatment. constructor.
+  apply reach_step with Recovery. constructor.
+  apply reach_step with Resolved. constructor.
   apply reach_refl.
 Qed.
 
 Lemma recognition_reaches_death :
   reachable Recognition Death.
 Proof.
-  apply reach_step with Stabilization. reflexivity.
-  apply reach_step with ActiveTreatment. reflexivity.
-  apply reach_step with Death. reflexivity.
+  apply reach_step with Stabilization. constructor.
+  apply reach_step with ActiveTreatment. constructor.
+  apply reach_step with Death. constructor.
   apply reach_refl.
 Qed.
 
 Lemma surgical_path_reaches_resolved :
   reachable SurgicalEvaluation Resolved.
 Proof.
-  apply reach_step with PostOperative. reflexivity.
-  apply reach_step with Recovery. reflexivity.
-  apply reach_step with Resolved. reflexivity.
+  apply reach_step with PostOperative. constructor.
+  apply reach_step with Recovery. constructor.
+  apply reach_step with Resolved. constructor.
   apply reach_refl.
 Qed.
 
@@ -1208,6 +1241,14 @@ Lemma terminal_is_terminal : forall p,
   is_terminal_phase p = true -> reachable p p.
 Proof.
   intros p _. apply reach_refl.
+Qed.
+
+(* Stabilization can reach surgery directly (e.g., fulminant presentation) *)
+Lemma stabilization_reaches_surgical :
+  reachable Stabilization Resolved.
+Proof.
+  apply reach_step with SurgicalEvaluation. constructor.
+  exact surgical_path_reaches_resolved.
 Qed.
 
 (* All starting phases can reach a terminal phase *)
@@ -1218,21 +1259,21 @@ Proof.
   destruct p.
   - left. exact recognition_reaches_resolved.
   - left.
-    apply reach_step with ActiveTreatment. reflexivity.
-    apply reach_step with Recovery. reflexivity.
-    apply reach_step with Resolved. reflexivity.
+    apply reach_step with ActiveTreatment. constructor.
+    apply reach_step with Recovery. constructor.
+    apply reach_step with Resolved. constructor.
     apply reach_refl.
   - left.
-    apply reach_step with Recovery. reflexivity.
-    apply reach_step with Resolved. reflexivity.
+    apply reach_step with Recovery. constructor.
+    apply reach_step with Resolved. constructor.
     apply reach_refl.
   - left. exact surgical_path_reaches_resolved.
   - left.
-    apply reach_step with Recovery. reflexivity.
-    apply reach_step with Resolved. reflexivity.
+    apply reach_step with Recovery. constructor.
+    apply reach_step with Resolved. constructor.
     apply reach_refl.
   - left.
-    apply reach_step with Resolved. reflexivity.
+    apply reach_step with Resolved. constructor.
     apply reach_refl.
   - left. apply reach_refl.
   - right. apply reach_refl.
