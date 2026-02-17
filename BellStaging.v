@@ -399,17 +399,11 @@ Definition inr_elevated (c : t) : bool :=
 Definition hypofibrinogenemia (c : t) : bool :=
   fibrinogen_mg_dL c <? 100.
 
-Definition hypocalcemia (c : t) : bool :=
-  ionized_calcium_x100 c <? 100.
-
 Definition coagulopathy_present (c : t) : bool :=
   pt_prolonged c || inr_elevated c || hypofibrinogenemia c.
 
 Definition dic_criteria_met (c : t) (platelets_low : bool) (elevated_lactate : bool) : bool :=
   platelets_low && coagulopathy_present c && elevated_lactate.
-
-Definition calcium_replacement_needed (c : t) (prbc_units : nat) : bool :=
-  hypocalcemia c || (4 <=? prbc_units).
 
 Lemma coagulopathy_implies_one_abnormal : forall c,
   coagulopathy_present c = true ->
