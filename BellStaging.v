@@ -1578,9 +1578,37 @@ Record Observation : Type := MkObservation {
   obs_severity : nat                        (* cached severity score *)
 }.
 
-(* Create observation from clinical state *)
+(* Consistency invariant: obs_time_hours matches the embedded clinical state's
+   hours_since_symptom_onset, ensuring the observation timestamp and the
+   state's internal clock agree. *)
+Definition observation_consistent (o : Observation) : Prop :=
+  obs_time_hours o = ClinicalState.hours_since_symptom_onset (obs_state o).
+
+(* Create observation from clinical state — enforces timestamp consistency *)
 Definition make_observation (time_h : nat) (state : ClinicalState.t) (stage : nat) : Observation :=
-  MkObservation time_h state stage (ClinicalState.overall_severity_score state).
+  MkObservation time_h
+    (ClinicalState.MkClinicalState
+      (ClinicalState.risk_factors state)
+      (ClinicalState.labs state)
+      (ClinicalState.coag state)
+      (ClinicalState.micro state)
+      (ClinicalState.vitals state)
+      (ClinicalState.systemic state)
+      (ClinicalState.intestinal state)
+      (ClinicalState.radiographic state)
+      (ClinicalState.neuro_status state)
+      time_h
+      (ClinicalState.systemic_assessed_h state)
+      (ClinicalState.intestinal_assessed_h state)
+      (ClinicalState.radiographic_assessed_h state))
+    stage
+    (ClinicalState.overall_severity_score state).
+
+Lemma make_observation_consistent : forall t s stage,
+  observation_consistent (make_observation t s stage).
+Proof.
+  intros. unfold observation_consistent, make_observation. simpl. reflexivity.
+Qed.
 
 (* A patient time series is a list of observations, newest first *)
 Definition PatientTimeSeries := list Observation.
