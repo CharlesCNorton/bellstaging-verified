@@ -1412,6 +1412,7 @@ Record t : Type := MkClinicalState {
   systemic : SystemicSigns.t;
   intestinal : IntestinalSigns.t;
   radiographic : RadiographicSigns.t;
+  neuro_status : NeonatalOrganFailure.NeuroStatus;
   hours_since_symptom_onset : nat;
   (* Assessment timestamps: hours since onset when each exam was last done *)
   systemic_assessed_h : nat;
@@ -1453,6 +1454,7 @@ Definition empty : t :=
     SystemicSigns.none
     IntestinalSigns.none
     RadiographicSigns.none
+    NeonatalOrganFailure.Normal
     0 0 0 0.
 
 Definition is_high_risk_patient (c : t) : bool :=
@@ -1518,6 +1520,7 @@ Definition overall_severity_score (c : t) : nat :=
   RiskFactors.risk_score (risk_factors c) +
   (match labs c with Some l => LabValues.lab_severity_score l | None => 0 end) +
   SystemicSigns.severity_score (systemic c) +
+  NeonatalOrganFailure.neurologic_score (neuro_status c) +
   (if has_coagulopathy c then 2 else 0) +
   (if has_dic c then 3 else 0) +
   (if has_positive_blood_culture c then 2 else 0).
@@ -2093,6 +2096,7 @@ Definition stage_IIA_witness : ClinicalState.t :=
     stage_IIA_witness_systemic
     stage_IIA_witness_intestinal
     stage_IIA_witness_radiographic
+    NeonatalOrganFailure.Normal
     12 12 12 12.
 
 Lemma stage_IIA_witness_classifies_correctly :
@@ -2116,6 +2120,7 @@ Definition stage_IIIB_witness : ClinicalState.t :=
     SystemicSigns.none
     IntestinalSigns.none
     stage_IIIB_witness_radiographic
+    NeonatalOrganFailure.Normal
     48 48 48 48.
 
 Lemma stage_IIIB_witness_classifies_correctly :
@@ -2142,6 +2147,7 @@ Definition stage_IA_witness : ClinicalState.t :=
     stage_IA_witness_systemic
     stage_IA_witness_intestinal
     RadiographicSigns.none
+    NeonatalOrganFailure.Normal
     4 4 4 4.
 
 Lemma stage_IA_witness_classifies_correctly :
@@ -2164,6 +2170,7 @@ Definition stage_IB_witness : ClinicalState.t :=
     stage_IB_witness_systemic
     stage_IB_witness_intestinal
     RadiographicSigns.none
+    NeonatalOrganFailure.Normal
     6 6 6 6.
 
 Lemma stage_IB_witness_classifies_correctly :
@@ -2189,6 +2196,7 @@ Definition stage_IIB_witness : ClinicalState.t :=
     stage_IIB_witness_systemic
     stage_IIB_witness_intestinal
     stage_IIB_witness_radiographic
+    NeonatalOrganFailure.Lethargic
     24 24 24 24.
 
 Lemma stage_IIB_witness_classifies_correctly :
@@ -2214,6 +2222,7 @@ Definition stage_IIIA_witness : ClinicalState.t :=
     stage_IIIA_witness_systemic
     stage_IIIA_witness_intestinal
     stage_IIIA_witness_radiographic
+    NeonatalOrganFailure.Obtunded
     36 36 36 36.
 
 Lemma stage_IIIA_witness_classifies_correctly :
@@ -2301,6 +2310,7 @@ Definition systemic_only : ClinicalState.t :=
     (SystemicSigns.MkSystemicSigns true true true true true true true true true true)
     IntestinalSigns.none
     RadiographicSigns.none
+    NeonatalOrganFailure.Normal
     24 24 24 24.
 
 Lemma systemic_signs_alone_insufficient_for_definite_nec :
@@ -2317,6 +2327,7 @@ Definition term_infant_low_risk : ClinicalState.t :=
     SystemicSigns.none
     IntestinalSigns.none
     RadiographicSigns.none
+    NeonatalOrganFailure.Normal
     0 0 0 0.
 
 Lemma term_infant_not_high_risk :
@@ -2340,6 +2351,7 @@ Definition isolated_perforation : ClinicalState.t :=
     SystemicSigns.none
     IntestinalSigns.none
     isolated_perforation_radiographic
+    NeonatalOrganFailure.Normal
     2 2 2 2.
 
 Lemma isolated_perforation_is_sip :
