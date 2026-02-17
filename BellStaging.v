@@ -3290,4 +3290,144 @@ Proof.
   simpl; lia.
 Qed.
 
+(* ================================================================ *)
+(* Cure #1: Exact disagreement characterization.                    *)
+(*                                                                  *)
+(* We construct concrete witness patients demonstrating divergence  *)
+(* in each direction, prove the classification results by           *)
+(* computation, and show full equivalence is refutable.             *)
+(* ================================================================ *)
+
+(* Minimal risk factors for clean witnesses *)
+Definition divergence_risk : RiskFactors.t :=
+  RiskFactors.MkRiskFactors 40 3500 false false false false false false.
+
+(* --- Witness 1: declarative = IIB, procedural = IA --- *)
+(* Systemic: metabolic_acidosis sign -> systemic_level = 2.
+   Intestinal: abdominal_cellulitis only (stage2b, no stage2) -> int_level = 2.
+   Radiographic: portal_venous_gas (stage2b finding) -> rad_level = 2.
+   classify_declarative: sys >= 2, int >= 2, rad >= 2 -> IIB.
+   classify_stage: IIB branch needs stage2_signs = true, but false -> falls to IA. *)
+Definition wit_decl_IIB_proc_IA : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    divergence_risk None None Microbiology.none None
+    (SystemicSigns.MkSystemicSigns
+      false false false false true false false false false false)
+    (IntestinalSigns.MkIntestinalSigns
+      false false false false false false true false false false)
+    (RadiographicSigns.MkRadiographicSigns
+      false false false false true false false)
+    NeonatalOrganFailure.Normal 0 0 0 0.
+
+Lemma wit1_declarative : classify_declarative wit_decl_IIB_proc_IA = Stage.IIB.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma wit1_procedural : Classification.classify wit_decl_IIB_proc_IA = Stage.IA.
+Proof. vm_compute. reflexivity. Qed.
+
+(* --- Witness 2: declarative = IIA, procedural = IA --- *)
+(* Systemic: temperature_instability -> systemic_level = 1.
+   Intestinal: absent_bowel_sounds -> stage2_signs = true, int_level = 2.
+   Radiographic: intestinal_dilation (stage2a, not pneumatosis) -> rad_level = 2.
+   classify_declarative: sys >= 1, int >= 2, rad >= 2 -> IIA.
+   classify_stage: IIA needs definite_nec_findings = pneumatosis = false -> IA. *)
+Definition wit_decl_IIA_proc_IA : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    divergence_risk None None Microbiology.none None
+    (SystemicSigns.MkSystemicSigns
+      true false false false false false false false false false)
+    (IntestinalSigns.MkIntestinalSigns
+      false false false false true false false false false false)
+    (RadiographicSigns.MkRadiographicSigns
+      false true false false false false false)
+    NeonatalOrganFailure.Normal 0 0 0 0.
+
+Lemma wit2_declarative : classify_declarative wit_decl_IIA_proc_IA = Stage.IIA.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma wit2_procedural : Classification.classify wit_decl_IIA_proc_IA = Stage.IA.
+Proof. vm_compute. reflexivity. Qed.
+
+(* --- Witness 3: procedural = IIB, declarative = IA --- *)
+(* Systemic: none -> systemic_level = 0.
+   Intestinal: absent_bowel_sounds + cellulitis -> stage2 + stage2b, int_level = 2.
+   Radiographic: portal_venous_gas -> stage2b, rad_level = 2.
+   classify_stage: IIB = (false || true) && true && true -> IIB.
+   classify_declarative: sys = 0 < 1 -> fails IB requirement -> IA. *)
+Definition wit_proc_IIB_decl_IA : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    divergence_risk None None Microbiology.none None
+    SystemicSigns.none
+    (IntestinalSigns.MkIntestinalSigns
+      false false false false true false true false false false)
+    (RadiographicSigns.MkRadiographicSigns
+      false false false false true false false)
+    NeonatalOrganFailure.Normal 0 0 0 0.
+
+Lemma wit3_procedural : Classification.classify wit_proc_IIB_decl_IA = Stage.IIB.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma wit3_declarative : classify_declarative wit_proc_IIB_decl_IA = Stage.IA.
+Proof. vm_compute. reflexivity. Qed.
+
+(* --- Witness 4: procedural = IIA, declarative = IA --- *)
+(* Systemic: none -> systemic_level = 0.
+   Intestinal: absent_bowel_sounds -> stage2 = true, int_level = 2.
+   Radiographic: pneumatosis -> definite_nec, rad_level = 2.
+   classify_stage: IIA = pneumatosis && stage2 = true -> IIA.
+   classify_declarative: sys = 0 < 1 -> IA. *)
+Definition wit_proc_IIA_decl_IA : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    divergence_risk None None Microbiology.none None
+    SystemicSigns.none
+    (IntestinalSigns.MkIntestinalSigns
+      false false false false true false false false false false)
+    (RadiographicSigns.MkRadiographicSigns
+      false false false true false false false)
+    NeonatalOrganFailure.Normal 0 0 0 0.
+
+Lemma wit4_procedural : Classification.classify wit_proc_IIA_decl_IA = Stage.IIA.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma wit4_declarative : classify_declarative wit_proc_IIA_decl_IA = Stage.IA.
+Proof. vm_compute. reflexivity. Qed.
+
+(* The two classifiers are not equivalent. *)
+Theorem classifiers_not_equivalent
+  : ~ (forall c, Classification.classify c = classify_declarative c).
+Proof.
+  intro H.
+  pose proof (H wit_decl_IIB_proc_IA) as Hw.
+  rewrite wit1_procedural in Hw. rewrite wit1_declarative in Hw.
+  discriminate.
+Qed.
+
+(* Divergence is bidirectional: neither classifier uniformly dominates. *)
+Theorem divergence_bidirectional
+  : (exists c, Stage.to_nat (classify_declarative c)
+               > Stage.to_nat (Classification.classify c))
+    /\ (exists c, Stage.to_nat (Classification.classify c)
+                  > Stage.to_nat (classify_declarative c)).
+Proof.
+  split.
+  - exists wit_decl_IIB_proc_IA.
+    rewrite wit1_declarative, wit1_procedural. simpl. lia.
+  - exists wit_proc_IIB_decl_IA.
+    rewrite wit3_procedural, wit3_declarative. simpl. lia.
+Qed.
+
+(* Maximum observed gap: 3 ordinal stages (IIB vs IA). *)
+Lemma max_divergence_decl_higher
+  : Stage.to_nat (classify_declarative wit_decl_IIB_proc_IA)
+    - Stage.to_nat (Classification.classify wit_decl_IIB_proc_IA) = 3.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma max_divergence_proc_higher
+  : Stage.to_nat (Classification.classify wit_proc_IIB_decl_IA)
+    - Stage.to_nat (classify_declarative wit_proc_IIB_decl_IA) = 3.
+Proof. vm_compute. reflexivity. Qed.
+
+(* Despite intermediate disagreement, both agree on the surgical
+   boundary (IIIB). See classify_agree_on_surgery above. *)
+
 End BellCriteria.
