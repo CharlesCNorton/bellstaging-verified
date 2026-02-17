@@ -967,21 +967,6 @@ Definition trajectory_severity (t : ClinicalTrajectory) : nat :=
 Definition trajectory_leb (t1 t2 : ClinicalTrajectory) : bool :=
   trajectory_severity t1 <=? trajectory_severity t2.
 
-(* Rate of change categories *)
-Inductive ChangeRate : Type :=
-  | NoChange : ChangeRate
-  | SlowChange : ChangeRate
-  | ModerateChange : ChangeRate
-  | RapidChange : ChangeRate.
-
-Definition rate_to_nat (r : ChangeRate) : nat :=
-  match r with
-  | NoChange => 0
-  | SlowChange => 1
-  | ModerateChange => 2
-  | RapidChange => 3
-  end.
-
 (* Management phases in clinical course *)
 Inductive ManagementPhase : Type :=
   | Recognition : ManagementPhase
