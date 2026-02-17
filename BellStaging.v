@@ -1904,6 +1904,27 @@ Definition diagnose (c : ClinicalState.t) : Diagnosis.t :=
 Definition classify (c : ClinicalState.t) : Stage.t :=
   classify_stage c.
 
+(* Staleness-guarded classifier: returns None if signs are stale *)
+Definition classify_checked (c : ClinicalState.t) : option Stage.t :=
+  if ClinicalState.signs_current c then Some (classify_stage c)
+  else None.
+
+Lemma classify_checked_requires_current : forall c s,
+  classify_checked c = Some s -> ClinicalState.signs_current c = true.
+Proof.
+  intros c s H. unfold classify_checked in H.
+  destruct (ClinicalState.signs_current c) eqn:E.
+  - reflexivity.
+  - discriminate.
+Qed.
+
+Lemma classify_checked_agrees : forall c,
+  ClinicalState.signs_current c = true ->
+  classify_checked c = Some (classify c).
+Proof.
+  intros c H. unfold classify_checked. rewrite H. reflexivity.
+Qed.
+
 Lemma pneumoperitoneum_forces_IIIB : forall c,
   RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = true ->
   classify c = Stage.IIIB.
