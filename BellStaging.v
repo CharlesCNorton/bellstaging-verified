@@ -336,15 +336,6 @@ Definition elevated_lactate (l : t) : bool :=
 Definition metabolic_acidosis (l : t) : bool :=
   (ph_x100 l <? 735) && (6 <? base_deficit l).
 
-Definition respiratory_acidosis (l : t) : bool :=
-  (ph_x100 l <? 735) && (45 <? pco2_mmHg l).
-
-Definition hypoglycemia (l : t) : bool :=
-  glucose_mg_dL l <? 45.
-
-Definition hyperglycemia (l : t) : bool :=
-  180 <? glucose_mg_dL l.
-
 Definition dic_likely (l : t) : bool :=
   severe_thrombocytopenia l && elevated_lactate l.
 
