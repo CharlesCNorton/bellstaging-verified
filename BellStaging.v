@@ -859,6 +859,73 @@ Definition duration_days (s : Stage.t) : nat :=
   | Stage.IIIA | Stage.IIIB => 14
   end.
 
+(* Culture-directed therapy: adjust regimen based on microbiology results.
+   Blood culture timing fields gate escalation: no positive result after
+   the escalation threshold hours triggers broadening consideration. *)
+Definition culture_escalation_threshold_h : nat := 48.
+
+Definition culture_pending_too_long (m : Microbiology.t) (current_h : nat) : bool :=
+  match Microbiology.blood_culture m, Microbiology.blood_culture_collected_h m with
+  | Microbiology.Pending, Some collected =>
+      culture_escalation_threshold_h <=? (current_h - collected)
+  | _, _ => false
+  end.
+
+Definition culture_directed_regimen (s : Stage.t) (m : Microbiology.t)
+    (current_h : nat) : Regimen :=
+  let base := recommended_regimen_by_stage s in
+  if Microbiology.fungal_sepsis m then Broad_VancMeropenem
+  else if Microbiology.gram_negative_sepsis m then
+    match base with
+    | Empiric_AmpGent => Empiric_AmpGentMetro
+    | _ => base
+    end
+  else if culture_pending_too_long m current_h then
+    match base with
+    | Empiric_AmpGent => Empiric_AmpGentMetro
+    | Empiric_AmpGentMetro => Broad_VancCefotaximeMetro
+    | _ => base
+    end
+  else base.
+
+Definition has_antifungal_coverage (r : Regimen) : bool :=
+  match r with
+  | Broad_VancMeropenem => true
+  | _ => false
+  end.
+
+Lemma fungal_sepsis_gets_antifungal : forall s m h,
+  Microbiology.fungal_sepsis m = true ->
+  has_antifungal_coverage (culture_directed_regimen s m h) = true.
+Proof.
+  intros s m h Hf. unfold culture_directed_regimen. rewrite Hf. reflexivity.
+Qed.
+
+Lemma gram_neg_gets_anaerobic : forall s m h,
+  Microbiology.gram_negative_sepsis m = true ->
+  has_anaerobic_coverage (culture_directed_regimen s m h) = true.
+Proof.
+  intros s m h Hgn. unfold culture_directed_regimen.
+  assert (Hfung: Microbiology.fungal_sepsis m = false).
+  { unfold Microbiology.fungal_sepsis, Microbiology.gram_negative_sepsis in *.
+    destruct (Microbiology.blood_culture m); try discriminate. reflexivity. }
+  rewrite Hfung, Hgn.
+  destruct s; reflexivity.
+Qed.
+
+Lemma culture_directed_never_weaker : forall s m h,
+  has_anaerobic_coverage (recommended_regimen_by_stage s) = true ->
+  has_anaerobic_coverage (culture_directed_regimen s m h) = true.
+Proof.
+  intros s m h Hbase. unfold culture_directed_regimen.
+  destruct (Microbiology.fungal_sepsis m); [reflexivity|].
+  destruct (Microbiology.gram_negative_sepsis m).
+  - destruct s; simpl in *; reflexivity.
+  - destruct (culture_pending_too_long m h).
+    + destruct s; simpl in *; try reflexivity.
+    + exact Hbase.
+Qed.
+
 Lemma advanced_nec_has_anaerobic_coverage : forall s,
   Stage.to_nat s >= 5 ->
   has_anaerobic_coverage (recommended_regimen_by_stage s) = true.
