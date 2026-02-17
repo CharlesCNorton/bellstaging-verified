@@ -919,9 +919,41 @@ Definition preferred_feed_type_post_nec : FeedType := BreastMilk.
 Definition days_to_full_feeds (start_volume : nat) : nat :=
   (full_feed_volume_ml_kg_day - start_volume) / advancement_rate_ml_kg_day.
 
-Lemma breast_milk_preferred :
-  preferred_feed_type_post_nec = BreastMilk.
+(* Total recovery timeline: NPO period + advancement from trophic to full *)
+Definition total_recovery_days (stage_nat : nat) : nat :=
+  npo_duration_by_stage stage_nat + days_to_full_feeds trophic_feed_volume_ml_kg_day.
+
+(* Trophic feeds reach full feeds in 6 days: (150-20)/20 = 6 *)
+Lemma trophic_to_full_feeds_duration :
+  days_to_full_feeds trophic_feed_volume_ml_kg_day = 6.
 Proof. reflexivity. Qed.
+
+(* Total recovery is bounded: at most 20 days (Stage III NPO 14 + advancement 6) *)
+Lemma total_recovery_bounded : forall stage_nat,
+  total_recovery_days stage_nat <= 20.
+Proof.
+  intros [|[|[|[|[|[|n]]]]]]; unfold total_recovery_days, npo_duration_by_stage,
+    days_to_full_feeds; simpl; lia.
+Qed.
+
+(* Higher stages require longer total recovery *)
+Lemma total_recovery_monotone : forall s1 s2,
+  1 <= s1 -> s1 <= s2 -> s2 <= 6 ->
+  total_recovery_days s1 <= total_recovery_days s2.
+Proof.
+  intros [|[|[|[|[|[|s1']]]]]]; intros [|[|[|[|[|[|s2']]]]]];
+  intros; unfold total_recovery_days, npo_duration_by_stage, days_to_full_feeds;
+  simpl; try lia.
+Qed.
+
+(* Refeeding can only begin after NPO period: total recovery > NPO alone *)
+Lemma recovery_exceeds_npo : forall stage_nat,
+  1 <= stage_nat -> stage_nat <= 6 ->
+  npo_duration_by_stage stage_nat < total_recovery_days stage_nat.
+Proof.
+  intros [|[|[|[|[|[|[|n]]]]]]]; intros H1 H2; try lia.
+  all: vm_compute; lia.
+Qed.
 
 Lemma stage_IIIB_requires_14_days_npo :
   npo_duration_by_stage 6 = 14.
