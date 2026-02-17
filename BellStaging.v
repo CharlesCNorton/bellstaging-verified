@@ -2494,9 +2494,29 @@ Proof.
   simpl. destruct (ci_stage1b_int c2 && ci_stage1_sys c2); reflexivity.
 Qed.
 
-Theorem every_patient_staged : forall c,
-  exists s, Classification.classify c = s.
-Proof. intros c. exists (Classification.classify c). reflexivity. Qed.
+(* Classification depends only on signs, not on timestamps or risk factors.
+   Changing hours_since_symptom_onset does not alter the stage. *)
+Theorem classify_independent_of_timestamp : forall c h,
+  Classification.classify c =
+  Classification.classify
+    (ClinicalState.MkClinicalState
+      (ClinicalState.risk_factors c)
+      (ClinicalState.labs c)
+      (ClinicalState.coag c)
+      (ClinicalState.micro c)
+      (ClinicalState.vitals c)
+      (ClinicalState.systemic c)
+      (ClinicalState.intestinal c)
+      (ClinicalState.radiographic c)
+      (ClinicalState.neuro_status c)
+      h
+      (ClinicalState.systemic_assessed_h c)
+      (ClinicalState.intestinal_assessed_h c)
+      (ClinicalState.radiographic_assessed_h c)).
+Proof.
+  intros c h. unfold Classification.classify, Classification.classify_stage.
+  destruct c; reflexivity.
+Qed.
 
 Theorem no_perforation_not_IIIB : forall c,
   RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = false ->
@@ -2642,15 +2662,35 @@ Proof.
   intros c s1 s2 H1 H2. rewrite <- H1. rewrite <- H2. reflexivity.
 Qed.
 
-(* Combined completeness statement *)
-Theorem classification_complete_and_unique : forall c,
-  exists! s, Classification.classify c = s.
+(* Breast milk is protective: switching from formula to breast milk
+   never increases the risk score, and strictly decreases it when
+   the infant was formula-fed with nonzero raw risk. *)
+Theorem breast_milk_reduces_risk : forall r,
+  RiskFactors.formula_fed r = true ->
+  RiskFactors.risk_score_raw r > 0 ->
+  RiskFactors.risk_score
+    (RiskFactors.MkRiskFactors
+      (RiskFactors.gestational_age_weeks r)
+      (RiskFactors.birth_weight_grams r)
+      false
+      (RiskFactors.history_of_perinatal_asphyxia r)
+      (RiskFactors.congenital_heart_disease r)
+      (RiskFactors.polycythemia r)
+      (RiskFactors.umbilical_catheter r)
+      (RiskFactors.exchange_transfusion r))
+  < RiskFactors.risk_score r.
 Proof.
-  intros c.
-  exists (Classification.classify c).
-  split.
-  - reflexivity.
-  - intros s' H. rewrite H. reflexivity.
+  intros r Hff Hraw.
+  unfold RiskFactors.risk_score, RiskFactors.risk_score_raw,
+    RiskFactors.protective_factor, RiskFactors.w_formula_fed,
+    RiskFactors.w_breast_milk_protective.
+  simpl. rewrite Hff. simpl.
+  destruct r as [ga bw ff asph chd poly umb exch]. simpl in *.
+  subst ff. simpl.
+  unfold RiskFactors.extremely_preterm, RiskFactors.very_preterm,
+    RiskFactors.moderate_preterm, RiskFactors.extremely_low_birth_weight,
+    RiskFactors.very_low_birth_weight, RiskFactors.low_birth_weight.
+  simpl. lia.
 Qed.
 
 End SafetyProperties.
