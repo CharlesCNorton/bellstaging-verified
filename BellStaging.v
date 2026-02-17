@@ -2503,6 +2503,39 @@ Definition classify_inputs (ci : ClassifierInputs) : Stage.t :=
   else if ci_stage1b_int ci && ci_stage1_sys ci then Stage.IB
   else Stage.IA.
 
+(* Extract ClassifierInputs from ClinicalState — the bridge between
+   the abstract monotonicity proof and the concrete classifier. *)
+Definition extract_ci (c : ClinicalState.t) : ClassifierInputs :=
+  let sys := ClinicalState.systemic c in
+  let int := ClinicalState.intestinal c in
+  let rad := ClinicalState.radiographic c in
+  MkCI
+    (RadiographicSigns.pneumoperitoneum rad)
+    (SystemicSigns.stage3_signs sys
+      || ClinicalState.effective_hypotension c
+      || ClinicalState.has_dic c
+      || ClinicalState.lab_neutropenia c)
+    (IntestinalSigns.stage3_signs int)
+    (RadiographicSigns.stage2a_findings rad || RadiographicSigns.stage2b_findings rad)
+    (SystemicSigns.stage2b_signs sys
+      || ClinicalState.lab_metabolic_acidosis c
+      || ClinicalState.lab_thrombocytopenia c)
+    (IntestinalSigns.stage2b_signs int)
+    (IntestinalSigns.stage2_signs int)
+    (RadiographicSigns.stage2b_findings rad)
+    (RadiographicSigns.definite_nec_findings rad)
+    (IntestinalSigns.stage1b_signs int)
+    (SystemicSigns.stage1_signs sys).
+
+(* The bridge: classify_inputs composed with extract_ci equals classify_stage *)
+Theorem classify_inputs_faithful : forall c,
+  classify_inputs (extract_ci c) = Classification.classify c.
+Proof.
+  intros c. unfold classify_inputs, extract_ci,
+    Classification.classify, Classification.classify_stage.
+  reflexivity.
+Qed.
+
 Definition ci_subset (c1 c2 : ClassifierInputs) : Prop :=
   implb (ci_pneumoperitoneum c1) (ci_pneumoperitoneum c2) = true /\
   implb (ci_stage3_sys c1) (ci_stage3_sys c2) = true /\
@@ -2606,6 +2639,17 @@ Proof.
     rewrite H1bi, H1s. simpl. reflexivity. }
   (* c1 at IA, c2 at IA or IB *)
   simpl. destruct (ci_stage1b_int c2 && ci_stage1_sys c2); reflexivity.
+Qed.
+
+(* Corollary: concrete monotonicity via the extract_ci bridge *)
+Corollary classify_monotone_concrete : forall c1 c2,
+  ci_subset (extract_ci c1) (extract_ci c2) ->
+  Stage.leb (Classification.classify c1) (Classification.classify c2) = true.
+Proof.
+  intros c1 c2 Hsub.
+  rewrite <- classify_inputs_faithful.
+  rewrite <- classify_inputs_faithful.
+  apply classify_inputs_monotone. exact Hsub.
 Qed.
 
 (* Classification depends only on signs, not on timestamps or risk factors.
