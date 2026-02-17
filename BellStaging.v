@@ -1109,9 +1109,24 @@ Definition stage_velocity_x10 (delta : TemporalDelta) : Z :=
   if delta_hours delta =? 0 then 0%Z
   else ((stage_change delta * 240) / Z.of_nat (delta_hours delta))%Z.
 
-(* Threshold for rapid deterioration: >1 stage per 12 hours *)
+(* Threshold for rapid deterioration: >1 stage per 12 hours.
+   Uses cross-multiplication (stage_change * 240 > threshold * duration)
+   to avoid integer-division truncation near threshold. *)
 Definition is_rapid_deterioration (delta : TemporalDelta) : bool :=
-  (stage_velocity_x10 delta >? 20)%Z.
+  if delta_hours delta =? 0 then false
+  else (stage_change delta * 240 >? 20 * Z.of_nat (delta_hours delta))%Z.
+
+(* Cross-multiplication agrees with division when division is exact *)
+Lemma rapid_deterioration_cross_mul_sound : forall d,
+  delta_hours d <> 0 ->
+  is_rapid_deterioration d = true ->
+  (stage_change d * 240 > 20 * Z.of_nat (delta_hours d))%Z.
+Proof.
+  intros d Hne H. unfold is_rapid_deterioration in H.
+  destruct (delta_hours d =? 0) eqn:E.
+  - apply Nat.eqb_eq in E. contradiction.
+  - apply Z.gtb_lt in H. lia.
+Qed.
 
 (* Valid transitions as inductive relation *)
 Inductive valid_transition : ManagementPhase -> ManagementPhase -> Prop :=
@@ -1736,9 +1751,8 @@ Definition compute_trajectory (ts : PatientTimeSeries) : TemporalProgression.Cli
         else if (stage_delta <? 0)%Z then TemporalProgression.Improving
         else TemporalProgression.Stable
       else
-      let velocity := if duration =? 0 then 0%Z
-                      else ((stage_delta * 240) / Z.of_nat duration)%Z in
-      if (velocity >? 20)%Z then TemporalProgression.RapidDeterioration
+      if (duration =? 0) then TemporalProgression.Stable
+      else if (stage_delta * 240 >? 20 * Z.of_nat duration)%Z then TemporalProgression.RapidDeterioration
       else if (stage_delta >? 0)%Z then TemporalProgression.Worsening
       else if (stage_delta <? 0)%Z then TemporalProgression.Improving
       else TemporalProgression.Stable
