@@ -2236,20 +2236,48 @@ Definition procedure_urgency (p : Procedure) : Urgency :=
   | StomaReversal => Elective
   end.
 
-Definition initial_procedure_for_perforation (birth_weight_grams : nat) : Procedure :=
-  if birth_weight_grams <? 1000 then PrimaryPeritonealDrainage
+(* Refined per NET trial (Moss et al. 2006, NEJM 354:2225-2234):
+   - ELBW (<1000g) and hemodynamically unstable: drain as bridge
+   - ELBW stable: laparotomy preferred (NET showed equivalent outcomes)
+   - >1000g: laparotomy
+   Hemodynamic instability = on vasopressors or MAP < threshold *)
+Definition initial_procedure_for_perforation
+    (birth_weight_grams : nat) (hemodynamically_unstable : bool) : Procedure :=
+  if (birth_weight_grams <? 1000) && hemodynamically_unstable
+  then PrimaryPeritonealDrainage
   else ExploratoryLaparotomy.
 
 Definition requires_stoma (extent_of_necrosis_percent : nat) : bool :=
   50 <? extent_of_necrosis_percent.
 
-Lemma elbw_gets_drain : forall bw,
-  bw < 1000 -> initial_procedure_for_perforation bw = PrimaryPeritonealDrainage.
+Lemma elbw_unstable_gets_drain : forall bw,
+  bw < 1000 ->
+  initial_procedure_for_perforation bw true = PrimaryPeritonealDrainage.
 Proof.
   intros bw H. unfold initial_procedure_for_perforation.
   destruct (bw <? 1000) eqn:E.
   - reflexivity.
   - apply Nat.ltb_ge in E. lia.
+Qed.
+
+(* NET trial nuance: stable ELBW gets laparotomy, not drain *)
+Lemma elbw_stable_gets_laparotomy : forall bw,
+  bw < 1000 ->
+  initial_procedure_for_perforation bw false = ExploratoryLaparotomy.
+Proof.
+  intros bw H. unfold initial_procedure_for_perforation.
+  destruct (bw <? 1000) eqn:E; reflexivity.
+Qed.
+
+(* Non-ELBW always gets laparotomy regardless of stability *)
+Lemma non_elbw_gets_laparotomy : forall bw stab,
+  1000 <= bw ->
+  initial_procedure_for_perforation bw stab = ExploratoryLaparotomy.
+Proof.
+  intros bw stab H. unfold initial_procedure_for_perforation.
+  destruct (bw <? 1000) eqn:E.
+  - apply Nat.ltb_lt in E. lia.
+  - reflexivity.
 Qed.
 
 End SurgicalProcedures.
