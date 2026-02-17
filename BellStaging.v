@@ -539,10 +539,6 @@ Definition hypoxemia (v : t) : bool :=
 Definition severe_hypoxemia (v : t) : bool :=
   spo2_percent v <? 85.
 
-(* Shock index (HR/SBP) - elevated suggests poor perfusion *)
-Definition shock_index_elevated (v : t) : bool :=
-  (systolic_bp_mmHg v * 15) <? (heart_rate_bpm v * 10).
-
 (* Vital sign severity score *)
 Definition severity_score (v : t) : nat :=
   (if bradycardia v then 2 else 0) +
