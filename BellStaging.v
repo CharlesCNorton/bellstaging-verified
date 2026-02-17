@@ -2956,6 +2956,44 @@ Definition compute_systemic_level (c : ClinicalState.t) : nat :=
   else if SystemicSigns.stage1_signs sys then 1
   else 0.
 
+(* compute_systemic_level agrees with classify_stage's effective_stage3_sys:
+   level >= 3 iff the same disjunction that classify_stage uses is true. *)
+Lemma systemic_level_3_iff_effective_stage3 : forall c,
+  let eff3 := SystemicSigns.stage3_signs (ClinicalState.systemic c)
+    || ClinicalState.effective_hypotension c
+    || ClinicalState.has_dic c
+    || ClinicalState.lab_neutropenia c in
+  (compute_systemic_level c >= 3) <-> (eff3 = true).
+Proof.
+  intros c. unfold compute_systemic_level. simpl.
+  destruct (SystemicSigns.stage3_signs _ || _ || _ || _) eqn:E3.
+  - split; intros; [reflexivity | lia].
+  - split; intros H.
+    + simpl in H. destruct (SystemicSigns.stage2b_signs _ || _ || _);
+      simpl in H; try lia. destruct (SystemicSigns.stage1_signs _); simpl in H; lia.
+    + discriminate.
+Qed.
+
+Lemma systemic_level_2_iff_effective_stage2b : forall c,
+  let eff3 := SystemicSigns.stage3_signs (ClinicalState.systemic c)
+    || ClinicalState.effective_hypotension c
+    || ClinicalState.has_dic c
+    || ClinicalState.lab_neutropenia c in
+  let eff2b := SystemicSigns.stage2b_signs (ClinicalState.systemic c)
+    || ClinicalState.lab_metabolic_acidosis c
+    || ClinicalState.lab_thrombocytopenia c in
+  (compute_systemic_level c >= 2) <-> (eff3 = true \/ eff2b = true).
+Proof.
+  intros c. unfold compute_systemic_level. simpl.
+  destruct (SystemicSigns.stage3_signs _ || _ || _ || _) eqn:E3.
+  - split; intros; [left; reflexivity | lia].
+  - destruct (SystemicSigns.stage2b_signs _ || _ || _) eqn:E2b.
+    + split; intros; [right; reflexivity | lia].
+    + split; intros H.
+      * destruct (SystemicSigns.stage1_signs _); simpl in H; lia.
+      * destruct H; discriminate.
+Qed.
+
 Definition compute_intestinal_level (i : IntestinalSigns.t) : nat :=
   if IntestinalSigns.stage3_signs i then 3
   else if IntestinalSigns.stage2b_signs i || IntestinalSigns.stage2_signs i then 2
