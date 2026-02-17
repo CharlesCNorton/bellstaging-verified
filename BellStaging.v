@@ -3019,41 +3019,70 @@ Inductive Outcome : Type :=
   | Recurrence : Outcome
   | Death : Outcome.
 
-(* Mortality: Stage I (suspected) has near-zero attributable mortality;
-   Stage II 5-10%; Stage III 20-50% (Fitzgibbons 2009, Neu 2011) *)
+(* Risk ranges reflecting published uncertainty rather than point estimates *)
+Record RiskRange : Type := MkRiskRange {
+  low : nat;
+  mid : nat;
+  high : nat
+}.
+
+Definition valid_range (r : RiskRange) : Prop :=
+  low r <= mid r /\ mid r <= high r.
+
+(* Mortality ranges (percent):
+   Stage I: 0%; Stage II: 2-15%; Stage III: 15-50%
+   (Fitzgibbons 2009, Neu 2011) *)
+Definition mortality_risk (s : Stage.t) : RiskRange :=
+  match s with
+  | Stage.IA => MkRiskRange 0 0 0
+  | Stage.IB => MkRiskRange 0 0 2
+  | Stage.IIA => MkRiskRange 2 5 10
+  | Stage.IIB => MkRiskRange 5 10 15
+  | Stage.IIIA => MkRiskRange 15 20 30
+  | Stage.IIIB => MkRiskRange 20 30 50
+  end.
+
+(* Backward-compatible midpoint accessor *)
 Definition mortality_risk_percent (s : Stage.t) : nat :=
+  mid (mortality_risk s).
+
+(* Stricture ranges (Horwitz 1995, Butter 2006) *)
+Definition stricture_risk (s : Stage.t) : RiskRange :=
   match s with
-  | Stage.IA => 0
-  | Stage.IB => 0
-  | Stage.IIA => 5
-  | Stage.IIB => 10
-  | Stage.IIIA => 20
-  | Stage.IIIB => 30
+  | Stage.IA => MkRiskRange 0 0 0
+  | Stage.IB => MkRiskRange 0 0 5
+  | Stage.IIA => MkRiskRange 5 10 15
+  | Stage.IIB => MkRiskRange 10 20 30
+  | Stage.IIIA => MkRiskRange 15 25 35
+  | Stage.IIIB => MkRiskRange 25 35 45
   end.
 
-(* Stricture rates increase with disease severity and surgical intervention
-   (Horwitz 1995, Butter 2006 J Pediatr Surg 41:1632-1636) *)
 Definition stricture_risk_percent (s : Stage.t) : nat :=
+  mid (stricture_risk s).
+
+(* SBS ranges (Cole 2008, Wales 2010) *)
+Definition short_bowel_risk (s : Stage.t) : RiskRange :=
   match s with
-  | Stage.IA => 0
-  | Stage.IB => 0
-  | Stage.IIA => 10
-  | Stage.IIB => 20
-  | Stage.IIIA => 25
-  | Stage.IIIB => 35
+  | Stage.IA => MkRiskRange 0 0 0
+  | Stage.IB => MkRiskRange 0 0 0
+  | Stage.IIA => MkRiskRange 0 0 2
+  | Stage.IIB => MkRiskRange 2 5 10
+  | Stage.IIIA => MkRiskRange 5 10 15
+  | Stage.IIIB => MkRiskRange 15 25 35
   end.
 
-(* Short bowel syndrome risk correlates with extent of resection
-   (Cole 2008, Wales 2010 Semin Pediatr Surg 19:3-9) *)
 Definition short_bowel_risk_percent (s : Stage.t) : nat :=
-  match s with
-  | Stage.IA => 0
-  | Stage.IB => 0
-  | Stage.IIA => 0
-  | Stage.IIB => 5
-  | Stage.IIIA => 10
-  | Stage.IIIB => 25
-  end.
+  mid (short_bowel_risk s).
+
+(* All risk ranges are valid *)
+Lemma mortality_risk_valid : forall s, valid_range (mortality_risk s).
+Proof. intros []; unfold valid_range; simpl; lia. Qed.
+
+Lemma stricture_risk_valid : forall s, valid_range (stricture_risk s).
+Proof. intros []; unfold valid_range; simpl; lia. Qed.
+
+Lemma short_bowel_risk_valid : forall s, valid_range (short_bowel_risk s).
+Proof. intros []; unfold valid_range; simpl; lia. Qed.
 
 Definition requires_long_term_followup (s : Stage.t) : bool :=
   match s with
@@ -3070,11 +3099,11 @@ Definition neurodevelopmental_risk_elevated (s : Stage.t) (required_surgery : bo
 
 Lemma stage_IIIB_highest_mortality :
   forall s, mortality_risk_percent s <= mortality_risk_percent Stage.IIIB.
-Proof. intros []; simpl; lia. Qed.
+Proof. intros []; vm_compute; lia. Qed.
 
 Lemma suspected_nec_no_mortality :
   forall s, StageProgression.is_suspected s = true -> mortality_risk_percent s = 0.
-Proof. intros []; simpl; intro H; try discriminate; reflexivity. Qed.
+Proof. intros []; vm_compute; intro H; try discriminate; reflexivity. Qed.
 
 Lemma definite_nec_requires_followup :
   forall s, StageProgression.is_definite s = true -> requires_long_term_followup s = true.
@@ -3084,16 +3113,14 @@ Lemma higher_stage_worse_mortality : forall s1 s2,
   Stage.leb s1 s2 = true ->
   mortality_risk_percent s1 <= mortality_risk_percent s2.
 Proof.
-  intros s1 s2 H.
-  destruct s1; destruct s2; simpl in *; try lia; try discriminate.
+  intros [] []; vm_compute; intro H; try lia; discriminate.
 Qed.
 
 Lemma higher_stage_worse_stricture : forall s1 s2,
   Stage.leb s1 s2 = true ->
   stricture_risk_percent s1 <= stricture_risk_percent s2.
 Proof.
-  intros s1 s2 H.
-  destruct s1; destruct s2; simpl in *; try lia; try discriminate.
+  intros [] []; vm_compute; intro H; try lia; discriminate.
 Qed.
 
 End Prognosis.
