@@ -1371,14 +1371,24 @@ Definition severity_score (s : t) : nat :=
   (if dic s then 3 else 0) +
   (if neutropenia s then 3 else 0).
 
+(* Scalable bound: each weighted boolean contributes at most its weight *)
+Lemma bool_weight_bound : forall (b : bool) (w : nat), (if b then w else 0) <= w.
+Proof. intros [] w; lia. Qed.
+
 Lemma severity_score_max : forall s, severity_score s <= 20.
 Proof.
   intros s. unfold severity_score.
-  destruct (temperature_instability s); destruct (apnea s);
-  destruct (bradycardia s); destruct (lethargy s);
-  destruct (metabolic_acidosis s); destruct (thrombocytopenia s);
-  destruct (hypotension s); destruct (respiratory_failure s);
-  destruct (dic s); destruct (neutropenia s); simpl; lia.
+  pose proof (bool_weight_bound (temperature_instability s) 1).
+  pose proof (bool_weight_bound (apnea s) 1).
+  pose proof (bool_weight_bound (bradycardia s) 1).
+  pose proof (bool_weight_bound (lethargy s) 1).
+  pose proof (bool_weight_bound (metabolic_acidosis s) 2).
+  pose proof (bool_weight_bound (thrombocytopenia s) 2).
+  pose proof (bool_weight_bound (hypotension s) 3).
+  pose proof (bool_weight_bound (respiratory_failure s) 3).
+  pose proof (bool_weight_bound (dic s) 3).
+  pose proof (bool_weight_bound (neutropenia s) 3).
+  lia.
 Qed.
 
 End SystemicSigns.
