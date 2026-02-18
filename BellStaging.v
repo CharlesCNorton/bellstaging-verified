@@ -222,20 +222,48 @@ Definition risk_score_raw (r : t) : nat :=
 Definition protective_factor (r : t) : nat :=
   if formula_fed r then 0 else w_breast_milk_protective.
 
+(* Z-based risk score avoids nat underflow when protective > raw *)
+Definition risk_score_Z (r : t) : Z :=
+  (Z.of_nat (risk_score_raw r) - Z.of_nat (protective_factor r))%Z.
+
+(* Nat accessor: clamps negative scores to 0 *)
 Definition risk_score (r : t) : nat :=
-  risk_score_raw r - protective_factor r.
+  Z.to_nat (Z.max 0 (risk_score_Z r)).
 
 Definition high_risk (r : t) : bool :=
   6 <=? risk_score r.
+
+(* The Z score can go negative: a term breast-fed infant with no
+   comorbidities has raw = 0, protective = 2, so Z score = -2. *)
+Lemma risk_score_Z_can_be_negative :
+  exists r, (risk_score_Z r < 0)%Z.
+Proof.
+  exists (MkRiskFactors 40 3500 false false false false false false).
+  vm_compute. reflexivity.
+Qed.
+
+(* When Z score is negative, nat risk_score clamps to 0 *)
+Lemma risk_score_nonneg_clamp : forall r,
+  (risk_score_Z r < 0)%Z -> risk_score r = 0.
+Proof.
+  intros r H. unfold risk_score. rewrite Z.max_l; [reflexivity | lia].
+Qed.
 
 Lemma extremely_preterm_high_risk : forall r,
   extremely_preterm r = true ->
   extremely_low_birth_weight r = true ->
   high_risk r = true.
 Proof.
-  intros r Hp Hw. unfold high_risk, risk_score, risk_score_raw, protective_factor.
+  intros r Hp Hw. unfold high_risk, risk_score, risk_score_Z,
+    risk_score_raw, protective_factor.
   rewrite Hp, Hw. simpl.
-  destruct (formula_fed r); reflexivity.
+  destruct (formula_fed r) eqn:Eff;
+  destruct (history_of_perinatal_asphyxia r);
+  destruct (congenital_heart_disease r);
+  destruct (polycythemia r);
+  destruct (umbilical_catheter r);
+  destruct (exchange_transfusion r);
+  vm_compute; reflexivity.
 Qed.
 
 End RiskFactors.
@@ -2879,6 +2907,28 @@ Qed.
 (* Breast milk is protective: switching from formula to breast milk
    never increases the risk score, and strictly decreases it when
    the infant was formula-fed with nonzero raw risk. *)
+(* Helper: when formula_fed = true, protective_factor = 0,
+   so risk_score equals risk_score_raw *)
+Lemma risk_score_formula_fed : forall r,
+  RiskFactors.formula_fed r = true ->
+  RiskFactors.risk_score r = RiskFactors.risk_score_raw r.
+Proof.
+  intros r Hff. unfold RiskFactors.risk_score, RiskFactors.risk_score_Z,
+    RiskFactors.protective_factor.
+  rewrite Hff. simpl. rewrite Z.sub_0_r. rewrite Z.max_r; [|lia].
+  apply Nat2Z.id.
+Qed.
+
+(* Helper: risk_score is always <= risk_score_raw *)
+Lemma risk_score_le_raw : forall r,
+  RiskFactors.risk_score r <= RiskFactors.risk_score_raw r.
+Proof.
+  intros r. unfold RiskFactors.risk_score, RiskFactors.risk_score_Z.
+  destruct (Z.max_spec 0 (Z.of_nat (RiskFactors.risk_score_raw r) -
+    Z.of_nat (RiskFactors.protective_factor r))%Z) as [[_ Hm]|[_ Hm]];
+  rewrite Hm; lia.
+Qed.
+
 Theorem breast_milk_reduces_risk : forall r,
   RiskFactors.formula_fed r = true ->
   RiskFactors.risk_score_raw r > 0 ->
@@ -2895,16 +2945,56 @@ Theorem breast_milk_reduces_risk : forall r,
   < RiskFactors.risk_score r.
 Proof.
   intros r Hff Hraw.
-  unfold RiskFactors.risk_score, RiskFactors.risk_score_raw,
-    RiskFactors.protective_factor, RiskFactors.w_formula_fed,
-    RiskFactors.w_breast_milk_protective.
-  simpl. rewrite Hff. simpl.
+  set (r' := RiskFactors.MkRiskFactors
+    (RiskFactors.gestational_age_weeks r)
+    (RiskFactors.birth_weight_grams r) false
+    (RiskFactors.history_of_perinatal_asphyxia r)
+    (RiskFactors.congenital_heart_disease r)
+    (RiskFactors.polycythemia r)
+    (RiskFactors.umbilical_catheter r)
+    (RiskFactors.exchange_transfusion r)).
+  (* risk_score r = risk_score_raw r because protective_factor r = 0 *)
+  replace (RiskFactors.risk_score r) with (RiskFactors.risk_score_raw r).
+  2:{ symmetry. apply risk_score_formula_fed. exact Hff. }
+  (* risk_score r' <= risk_score_raw r' *)
+  pose proof (risk_score_le_raw r') as Hle.
+  (* raw(r') = raw(r) - w_formula_fed because only formula_fed changed *)
   destruct r as [ga bw ff asph chd poly umb exch]. simpl in *.
-  subst ff. simpl.
-  unfold RiskFactors.extremely_preterm, RiskFactors.very_preterm,
-    RiskFactors.moderate_preterm, RiskFactors.extremely_low_birth_weight,
-    RiskFactors.very_low_birth_weight, RiskFactors.low_birth_weight.
-  simpl. lia.
+  subst ff. subst r'.
+  (* Key fact: raw scores differ by exactly w_formula_fed = 1 *)
+  assert (Hraw_eq: RiskFactors.risk_score_raw
+    (RiskFactors.MkRiskFactors ga bw true asph chd poly umb exch) =
+    RiskFactors.risk_score_raw
+    (RiskFactors.MkRiskFactors ga bw false asph chd poly umb exch) +
+    RiskFactors.w_formula_fed).
+  { unfold RiskFactors.risk_score_raw,
+      RiskFactors.extremely_preterm, RiskFactors.very_preterm,
+      RiskFactors.moderate_preterm, RiskFactors.extremely_low_birth_weight,
+      RiskFactors.very_low_birth_weight, RiskFactors.low_birth_weight.
+    cbn [RiskFactors.formula_fed RiskFactors.gestational_age_weeks
+         RiskFactors.birth_weight_grams RiskFactors.history_of_perinatal_asphyxia
+         RiskFactors.congenital_heart_disease RiskFactors.polycythemia
+         RiskFactors.umbilical_catheter RiskFactors.exchange_transfusion].
+    lia. }
+  (* protective_factor when formula_fed = true is 0 *)
+  assert (Hpf_orig: RiskFactors.protective_factor
+    (RiskFactors.MkRiskFactors ga bw true asph chd poly umb exch) = 0).
+  { reflexivity. }
+  (* protective_factor when formula_fed = false is w_breast_milk_protective *)
+  assert (Hpf_mod: RiskFactors.protective_factor
+    (RiskFactors.MkRiskFactors ga bw false asph chd poly umb exch) =
+    RiskFactors.w_breast_milk_protective).
+  { reflexivity. }
+  (* Unfold risk_score and protective_factor fully *)
+  unfold RiskFactors.risk_score, RiskFactors.risk_score_Z,
+    RiskFactors.protective_factor.
+  cbn [RiskFactors.formula_fed].
+  (* Now the goal has concrete protective factors (0 and 2) and
+     risk_score_raw on both sides. Rewrite raw score relationship. *)
+  rewrite Hraw_eq.
+  unfold RiskFactors.w_formula_fed.
+  cbn [ClinicalParameters.param_value ClinicalParameters.weight_formula_fed].
+  lia.
 Qed.
 
 End SafetyProperties.
