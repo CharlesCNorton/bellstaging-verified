@@ -9,27 +9,23 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: rocq/rocq-prover:9.0
+      options: --user root
     steps:
       - uses: actions/checkout@v4
 
-      - uses: coq-community/docker-coq-action@v1
-        with:
-          custom_image: rocq/rocq-prover:9.0
-          before_install: |
-            startGroup "Fix permissions"
-            sudo chown -R coq:coq .
-            endGroup
-          install: ""
-          before_script: ""
-          script: ""
-          after_script: ""
-          custom_script: |
-            startGroup "Install QuickChick"
-            opam install coq-quickchick --yes
-            endGroup
-            startGroup "Build"
-            coqc -Q . BellStaging BellStaging.v
-            endGroup
-            startGroup "QuickChick tests"
-            coqc -Q . BellStaging BellStagingQC.v
-            endGroup
+      - name: Install QuickChick
+        run: |
+          opam install coq-quickchick --yes
+          eval $(opam env)
+
+      - name: Build
+        run: |
+          eval $(opam env)
+          coqc -Q . BellStaging BellStaging.v
+
+      - name: QuickChick tests
+        run: |
+          eval $(opam env)
+          coqc -Q . BellStaging BellStagingQC.v
