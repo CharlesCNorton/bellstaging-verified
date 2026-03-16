@@ -499,7 +499,9 @@ Record t : Type := MkClinicalState {
    Kept separate to avoid breaking the core MkClinicalState constructor. *)
 Record extended_t : Type := MkExtendedClinicalState {
   base_state : t;
-  meds : option RiskFactors.MedicationRiskFactors
+  meds : option RiskFactors.MedicationRiskFactors;
+  day_of_life : option nat;
+  feed_advancement_rate : option nat  (* mL/kg/day *)
 }.
 
 Definition extended_risk_score (e : extended_t) : nat :=
@@ -514,6 +516,33 @@ Definition extended_protective_score (e : extended_t) : nat :=
   | Some m => RiskFactors.medication_protective_score m
   | None => 0
   end.
+
+(* SGA status derived from risk factors *)
+Definition is_sga_patient (e : extended_t) : bool :=
+  RiskFactors.is_sga (risk_factors (base_state e)).
+
+(* Peak NEC window assessment *)
+Definition in_nec_window (e : extended_t) : bool :=
+  match day_of_life e with
+  | Some dol =>
+      RiskFactors.in_peak_nec_window
+        (RiskFactors.gestational_age_weeks (risk_factors (base_state e))) dol
+  | None => false
+  end.
+
+(* Rapid feed advancement risk *)
+Definition has_rapid_advancement (e : extended_t) : bool :=
+  match feed_advancement_rate e with
+  | Some rate => RiskFactors.rapid_feed_advancement_threshold <? rate
+  | None => false
+  end.
+
+(* Composite extended risk incorporating all wired factors *)
+Definition composite_risk_score (e : extended_t) : nat :=
+  extended_risk_score e +
+  (if is_sga_patient e then 2 else 0) +
+  (if in_nec_window e then 1 else 0) +
+  (if has_rapid_advancement e then 2 else 0).
 
 Definition default_risk_factors : RiskFactors.t :=
   RiskFactors.MkRiskFactors 40 3500 false false false false false false.
@@ -695,6 +724,27 @@ Record current_t : Type := MkCurrentState {
   current_state : t;
   current_proof : signs_current current_state = true
 }.
+
+(* Partial information model: identifies which data is missing and
+   should prompt the clinician to order tests. *)
+Inductive DataCompleteness : Type :=
+  | Complete : DataCompleteness
+  | MissingLabs : DataCompleteness
+  | MissingCoag : DataCompleteness
+  | MissingVitals : DataCompleteness
+  | MissingMultiple : DataCompleteness.
+
+Definition data_completeness (c : t) : DataCompleteness :=
+  match labs c, coag c, vitals c with
+  | Some _, Some _, Some _ => Complete
+  | None, _, _ => if match coag c with None => true | _ => false end
+                   then MissingMultiple else MissingLabs
+  | _, None, _ => MissingCoag
+  | _, _, None => MissingVitals
+  end.
+
+Definition is_complete (c : t) : bool :=
+  match data_completeness c with Complete => true | _ => false end.
 
 End ClinicalState.
 

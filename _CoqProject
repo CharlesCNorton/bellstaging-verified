@@ -5,5 +5,6 @@ BellStage.v
 BellClassification.v
 BellCriteriaDecl.v
 BellWitnesses.v
+BellModeling.v
 BellExtraction.v
 BellStagingQC.v

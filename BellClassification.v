@@ -137,6 +137,28 @@ Lemma classify_default_is_mildest : forall c,
   Stage.to_nat (classify c) >= Stage.to_nat Stage.IA.
 Proof. intros c. destruct (classify c); simpl; lia. Qed.
 
+(* Completeness: ConfirmedNEC requires findings and stage >= IIA *)
+Lemma confirmed_nec_has_findings : forall c s,
+  diagnose c = Diagnosis.ConfirmedNEC s ->
+  has_any_findings c = true.
+Proof.
+  intros c s H. unfold diagnose in H.
+  destruct (negb (has_any_findings c)) eqn:E.
+  - discriminate.
+  - apply Bool.negb_false_iff in E. exact E.
+Qed.
+
+Lemma confirmed_nec_stage_ge_IIA : forall c s,
+  diagnose c = Diagnosis.ConfirmedNEC s ->
+  Stage.to_nat s >= 3.
+Proof.
+  intros c s H. unfold diagnose in H.
+  destruct (negb (has_any_findings c)); [discriminate|].
+  destruct (RadiographicSigns.pneumoperitoneum _ && _)%bool; [discriminate|].
+  destruct (classify_stage c) eqn:Ec; try discriminate;
+  inversion H; subst; simpl; lia.
+Qed.
+
 Lemma no_findings_diagnoses_not_nec : forall c,
   has_any_findings c = false -> diagnose c = Diagnosis.NotNEC.
 Proof.
@@ -377,6 +399,24 @@ Lemma pneumoperitoneum_absolute : forall ctx,
 Proof.
   intros ctx H. unfold surgery_indicated, absolute_indication. rewrite H. reflexivity.
 Qed.
+
+(* Bridge: derive SurgicalContext from ClinicalState *)
+Definition surgical_context_of (c : ClinicalState.t)
+    (deteriorating : bool) (paracentesis_positive : bool) : SurgicalContext :=
+  let rad := ClinicalState.radiographic c in
+  let int := ClinicalState.intestinal c in
+  MkSurgicalContext
+    (RadiographicSigns.pneumoperitoneum rad)
+    false  (* fixed loop requires serial imaging — not derivable from single state *)
+    (IntestinalSigns.abdominal_cellulitis int)
+    deteriorating
+    paracentesis_positive
+    (RadiographicSigns.portal_venous_gas rad && deteriorating).
+
+Lemma bridge_preserves_pneumoperitoneum : forall c d p,
+  has_pneumoperitoneum (surgical_context_of c d p) =
+  RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c).
+Proof. reflexivity. Qed.
 
 End SurgicalIndications.
 

@@ -46,6 +46,7 @@ make
 | `BellClassification.v` | Classifier, treatment, surgical indications, antibiotics, feeding, prognosis |
 | `BellCriteriaDecl.v` | Declarative Bell criteria and classifier agreement analysis |
 | `BellWitnesses.v` | Witness examples, safety properties, published case validations, sensitivity analysis |
+| `BellModeling.v` | Extended clinical modeling: SIP protocol, NEC extent, stewardship, trends, workflow, versioning, audit |
 | `BellExtraction.v` | OCaml extraction directives |
 | `BellStagingQC.v` | QuickChick property-based tests |
 

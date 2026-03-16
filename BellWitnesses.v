@@ -228,6 +228,34 @@ Lemma deteriorating_series_duration :
   TimeSeries.series_duration deteriorating_series = 24.
 Proof. reflexivity. Qed.
 
+(* Clinically plausible IIIB witness: pneumoperitoneum WITH systemic
+   compromise and intestinal findings, unlike the minimal IIIB witness
+   which has no systemic or intestinal signs. *)
+Definition plausible_IIIB : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    preterm_risk_factors
+    (Some abnormal_labs)
+    (Some ClinicalState.default_coag)
+    ClinicalState.default_micro
+    None
+    (SystemicSigns.MkSystemicSigns true true true true true true true true false false)
+    (IntestinalSigns.MkIntestinalSigns false true false true true true false false true true)
+    (RadiographicSigns.MkRadiographicSigns false true false true true true true)
+    NeonatalOrganFailure.SarnatII
+    48 48 48 48.
+
+Lemma plausible_IIIB_classifies :
+  Classification.classify plausible_IIIB = Stage.IIIB.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma plausible_IIIB_has_systemic :
+  SystemicSigns.stage3_signs (ClinicalState.systemic plausible_IIIB) = true.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma plausible_IIIB_has_intestinal :
+  IntestinalSigns.stage3_signs (ClinicalState.intestinal plausible_IIIB) = true.
+Proof. vm_compute. reflexivity. Qed.
+
 End WitnessExamples.
 
 Module CounterexampleAttempts.
@@ -504,6 +532,39 @@ Proof.
   intros c h. unfold Classification.classify, Classification.classify_stage.
   destruct c; reflexivity.
 Qed.
+
+(* classify_stage reads only: systemic, intestinal, radiographic, labs,
+   coag, vitals (for effective_hypotension). It does NOT read:
+   risk_factors, micro (except through has_dic/lab_neutropenia which
+   read labs not micro directly), neuro_status, or any timestamp.
+   We prove independence from each unused field. *)
+Theorem classify_independent_of_neuro : forall c n,
+  Classification.classify c =
+  Classification.classify
+    (ClinicalState.MkClinicalState
+      (ClinicalState.risk_factors c) (ClinicalState.labs c)
+      (ClinicalState.coag c) (ClinicalState.micro c)
+      (ClinicalState.vitals c) (ClinicalState.systemic c)
+      (ClinicalState.intestinal c) (ClinicalState.radiographic c)
+      n (ClinicalState.hours_since_symptom_onset c)
+      (ClinicalState.systemic_assessed_h c)
+      (ClinicalState.intestinal_assessed_h c)
+      (ClinicalState.radiographic_assessed_h c)).
+Proof. intros c n. unfold Classification.classify, Classification.classify_stage. destruct c; reflexivity. Qed.
+
+Theorem classify_independent_of_micro : forall c m,
+  Classification.classify c =
+  Classification.classify
+    (ClinicalState.MkClinicalState
+      (ClinicalState.risk_factors c) (ClinicalState.labs c)
+      (ClinicalState.coag c) m
+      (ClinicalState.vitals c) (ClinicalState.systemic c)
+      (ClinicalState.intestinal c) (ClinicalState.radiographic c)
+      (ClinicalState.neuro_status c) (ClinicalState.hours_since_symptom_onset c)
+      (ClinicalState.systemic_assessed_h c)
+      (ClinicalState.intestinal_assessed_h c)
+      (ClinicalState.radiographic_assessed_h c)).
+Proof. intros c m. unfold Classification.classify, Classification.classify_stage. destruct c; reflexivity. Qed.
 
 Theorem no_perforation_not_IIIB : forall c,
   RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = false ->
@@ -1065,6 +1126,21 @@ Module ClassifierAgreement.
      to classify_stage's effective_stage3_sys check.
 
    Safety guarantee: both agree on IIIB (surgery). See classify_agree_on_surgery. *)
+
+(* Treatment impact of classifier divergence.
+   The maximum 3-stage gap (IA vs IIB) produces these treatment differences:
+   - NPO duration: 3 days (IA) vs 10 days (IIB) = 7-day difference
+   - Antibiotics: Empiric_AmpGent (IA) vs Empiric_AmpGentMetro (IIB)
+   - Surgery: neither requires surgery (both < IIIB) *)
+Lemma divergence_npo_impact :
+  Treatment.npo_duration_days (Treatment.of_stage Stage.IIB) -
+  Treatment.npo_duration_days (Treatment.of_stage Stage.IA) = 7.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma divergence_no_surgery_impact :
+  Treatment.requires_surgery (Treatment.of_stage Stage.IA) = false /\
+  Treatment.requires_surgery (Treatment.of_stage Stage.IIB) = false.
+Proof. vm_compute. split; reflexivity. Qed.
 
 End ClassifierAgreement.
 

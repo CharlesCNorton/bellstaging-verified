@@ -292,6 +292,21 @@ Proof.
   exact H3.
 Qed.
 
+(* Age-adjusted differential diagnosis integrating likelihood functions *)
+Definition age_adjusted_diagnosis (f : DifferentialFeatures)
+    (ga_weeks day_of_life : nat) : GIDifferential :=
+  let base := most_likely_diagnosis f in
+  let nec_adj := age_adjusted_nec_likelihood ga_weeks day_of_life in
+  let volv_adj := age_adjusted_volvulus_likelihood day_of_life in
+  let sip_adj := age_adjusted_sip_likelihood ga_weeks in
+  match base with
+  | NEC => if nec_adj <? 2 then FeedingIntolerance else NEC
+  | Volvulus => if volv_adj <? 2 then base else Volvulus
+  | SpontaneousIntestinalPerforation =>
+      if sip_adj <? 2 then NEC else SpontaneousIntestinalPerforation
+  | _ => base
+  end.
+
 End DifferentialDiagnosis.
 
 Module SystemicSigns.
@@ -457,5 +472,22 @@ Definition us_suggests_perforation (u : UltrasoundFindings) : bool :=
 Lemma pneumoperitoneum_implies_stage3b : forall r,
   pneumoperitoneum r = true -> stage3b_findings r = true.
 Proof. intros r H. unfold stage3b_findings. exact H. Qed.
+
+(* Multi-modal imaging integration: combines X-ray and ultrasound findings *)
+Definition combined_imaging_assessment
+    (xray : t) (us : option UltrasoundFindings) : bool :=
+  definite_nec_findings xray ||
+  match us with
+  | Some u => us_suggests_nec u
+  | None => false
+  end.
+
+Definition combined_perforation_assessment
+    (xray : t) (us : option UltrasoundFindings) : bool :=
+  pneumoperitoneum xray ||
+  match us with
+  | Some u => us_suggests_perforation u
+  | None => false
+  end.
 
 End RadiographicSigns.
