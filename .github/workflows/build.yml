@@ -25,3 +25,5 @@ jobs:
             startGroup "QuickChick tests"
             coqc -Q . BellStaging BellStagingQC.v
             endGroup
+          before_script: |
+            sudo chown -R coq:coq .
