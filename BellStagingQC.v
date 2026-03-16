@@ -15,7 +15,10 @@
 
 From Stdlib Require Import Arith Bool List ZArith Lia String.
 From QuickChick Require Import QuickChick.
-From BellStaging Require Import BellStaging.
+From BellStaging Require Import BellParams.
+From BellStaging Require Import BellSigns.
+From BellStaging Require Import BellStage.
+From BellStaging Require Import BellClassification.
 
 Import ListNotations.
 Open Scope string_scope.

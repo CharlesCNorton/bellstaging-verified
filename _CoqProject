@@ -1,3 +1,9 @@
 -Q . BellStaging
-BellStaging.v
+BellParams.v
+BellSigns.v
+BellStage.v
+BellClassification.v
+BellCriteriaDecl.v
+BellWitnesses.v
+BellExtraction.v
 BellStagingQC.v

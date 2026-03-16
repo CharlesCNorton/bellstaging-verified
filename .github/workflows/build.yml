@@ -8,18 +8,49 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rocq_version: ["9.0.0"]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build and test
+      - name: Cache opam
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.opam-cache
+          key: opam-${{ matrix.rocq_version }}-quickchick-2.1.1
+
+      - name: Build, test, and verify
         run: |
           docker run --rm -v "${{ github.workspace }}:/work" -w /work \
-            rocq/rocq-prover:9.0 \
+            -v "${HOME}/.opam-cache:/opam-cache" \
+            rocq/rocq-prover:${{ matrix.rocq_version }} \
             bash -c '
-              sudo chown -R $(whoami) /work &&
-              opam install coq-quickchick --yes &&
-              eval $(opam env) &&
-              coqc -Q . BellStaging BellStaging.v &&
-              coqc -Q . BellStaging BellStagingQC.v
+              set -euo pipefail
+              sudo chown -R $(whoami) /work
+
+              # Restore or install QuickChick
+              if [ -d /opam-cache/default ]; then
+                sudo cp -a /opam-cache/default/. $(opam var prefix)/
+              else
+                opam install coq-quickchick.2.1.1 --yes
+                sudo mkdir -p /opam-cache/default
+                sudo cp -a $(opam var prefix)/. /opam-cache/default/
+              fi
+              eval $(opam env)
+
+              # Compile main development
+              coqc -Q . BellStaging BellStaging.v
+
+              # Run QuickChick tests and assert all pass
+              QC_OUTPUT=$(coqc -Q . BellStaging BellStagingQC.v 2>&1)
+              echo "$QC_OUTPUT"
+              if echo "$QC_OUTPUT" | grep -q "Failed"; then
+                echo "::error::QuickChick property test failed"
+                exit 1
+              fi
+
+              # Verify proof terms
+              coqchk -Q . BellStaging BellStaging.BellStaging
             '

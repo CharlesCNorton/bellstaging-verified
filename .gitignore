@@ -5,3 +5,7 @@
 *.aux
 .lia.cache
 .coq-native/
+Makefile.coq
+Makefile.coq.conf
+.Makefile.coq.d
+BellStaging.v.old
