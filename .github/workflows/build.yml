@@ -15,6 +15,14 @@ jobs:
       - uses: coq-community/docker-coq-action@v1
         with:
           custom_image: rocq/rocq-prover:9.0
+          before_install: |
+            startGroup "Fix permissions"
+            sudo chown -R coq:coq .
+            endGroup
+          install: ""
+          before_script: ""
+          script: ""
+          after_script: ""
           custom_script: |
             startGroup "Install QuickChick"
             opam install coq-quickchick --yes
@@ -25,5 +33,3 @@ jobs:
             startGroup "QuickChick tests"
             coqc -Q . BellStaging BellStagingQC.v
             endGroup
-          before_script: |
-            sudo chown -R coq:coq .
