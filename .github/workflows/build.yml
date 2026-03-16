@@ -9,23 +9,17 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: rocq/rocq-prover:9.0
-      options: --user root
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install QuickChick
+      - name: Build and test
         run: |
-          opam install coq-quickchick --yes
-          eval $(opam env)
-
-      - name: Build
-        run: |
-          eval $(opam env)
-          coqc -Q . BellStaging BellStaging.v
-
-      - name: QuickChick tests
-        run: |
-          eval $(opam env)
-          coqc -Q . BellStaging BellStagingQC.v
+          docker run --rm -v "${{ github.workspace }}:/work" -w /work \
+            rocq/rocq-prover:9.0 \
+            bash -c '
+              sudo chown -R coq:coq /work &&
+              opam install coq-quickchick --yes &&
+              eval $(opam env) &&
+              coqc -Q . BellStaging BellStaging.v &&
+              coqc -Q . BellStaging BellStagingQC.v
+            '
