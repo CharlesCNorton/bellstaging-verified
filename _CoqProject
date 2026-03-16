@@ -1,10 +1,10 @@
--Q . BellStaging
-BellParams.v
-BellSigns.v
-BellStage.v
-BellClassification.v
-BellCriteriaDecl.v
-BellWitnesses.v
-BellModeling.v
-BellExtraction.v
-BellStagingQC.v
+-Q src BellStaging
+src/BellParams.v
+src/BellSigns.v
+src/BellStage.v
+src/BellClassification.v
+src/BellCriteriaDecl.v
+src/BellWitnesses.v
+src/BellModeling.v
+src/BellExtraction.v
+src/BellStagingQC.v
