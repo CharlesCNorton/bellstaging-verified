@@ -17,7 +17,7 @@ jobs:
           docker run --rm -v "${{ github.workspace }}:/work" -w /work \
             rocq/rocq-prover:9.0 \
             bash -c '
-              sudo chown -R coq:coq /work &&
+              sudo chown -R $(whoami) /work &&
               opam install coq-quickchick --yes &&
               eval $(opam env) &&
               coqc -Q . BellStaging BellStaging.v &&
