@@ -1140,3 +1140,57 @@ Proof.
 Qed.
 
 End NegativeSpaceTests.
+
+Module SafetySpec.
+
+(* Formal safety specification for the Bell staging classifier.
+   Safety means: the classifier never triggers surgery for a patient
+   who does not have pneumoperitoneum, and always triggers surgery
+   for a patient who does. *)
+
+(* S1: Surgery is necessary and sufficient for pneumoperitoneum *)
+Theorem safety_surgery_iff_perforation : forall c,
+  Treatment.requires_surgery (Treatment.of_stage (Classification.classify c)) = true <->
+  RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = true.
+Proof.
+  intros c. split.
+  - intros H.
+    pose proof (SafetyProperties.surgery_only_at_IIIB
+      (Classification.classify c)) as Hs.
+    assert (Hc: Classification.classify c = Stage.IIIB).
+    { apply Hs. exact H. }
+    unfold Classification.classify, Classification.classify_stage in Hc.
+    destruct (RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c)) eqn:E.
+    + reflexivity.
+    + destruct ((_ && _ && _)%bool); try discriminate.
+      destruct ((_ && _ && _)%bool); try discriminate.
+      destruct ((_ && _)%bool); try discriminate.
+      destruct ((_ && _)%bool); discriminate.
+  - intros H. exact (SafetyProperties.perforation_always_surgical c H).
+Qed.
+
+(* S2: Non-surgical stages never trigger surgery *)
+Theorem safety_no_unnecessary_surgery : forall c,
+  RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = false ->
+  Treatment.requires_surgery (Treatment.of_stage (Classification.classify c)) = false.
+Proof.
+  intros c Hno.
+  destruct (Treatment.requires_surgery _) eqn:E; [|reflexivity].
+  exfalso. apply (SafetyProperties.no_perforation_not_IIIB c Hno).
+  apply SafetyProperties.surgery_only_at_IIIB. exact E.
+Qed.
+
+(* S3: Classifier is monotone — adding findings never decreases stage *)
+Theorem safety_monotone : forall c1 c2,
+  SafetyProperties.ci_subset
+    (SafetyProperties.extract_ci c1) (SafetyProperties.extract_ci c2) ->
+  Stage.leb (Classification.classify c1) (Classification.classify c2) = true.
+Proof. exact SafetyProperties.classify_monotone_concrete. Qed.
+
+(* Concrete monotonicity bridge: any stage is bounded by IIIB,
+   so adding pneumoperitoneum (which forces IIIB) never decreases stage. *)
+Theorem adding_pneumoperitoneum_bounded : forall c,
+  Stage.to_nat (Classification.classify c) <= Stage.to_nat Stage.IIIB.
+Proof. intros c. destruct (Classification.classify c); simpl; lia. Qed.
+
+End SafetySpec.

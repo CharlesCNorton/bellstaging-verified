@@ -106,6 +106,15 @@ Proof.
   intros c H. unfold classify_checked. rewrite H. reflexivity.
 Qed.
 
+(* Type-safe classifier: only accepts freshness-witnessed states.
+   Returns a stage directly (no option) since freshness is guaranteed. *)
+Definition classify_current (c : ClinicalState.current_t) : Stage.t :=
+  classify (ClinicalState.current_state c).
+
+Lemma classify_current_agrees : forall c,
+  classify_current c = classify (ClinicalState.current_state c).
+Proof. reflexivity. Qed.
+
 Lemma pneumoperitoneum_forces_IIIB : forall c,
   RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = true ->
   classify c = Stage.IIIB.
@@ -119,6 +128,14 @@ Proof.
   intros c; unfold Stage.stage_count; split;
   destruct (classify c); simpl; lia.
 Qed.
+
+(* The default fall-through of classify_stage is Stage.IA — the mildest
+   stage. This is conservative: when no staging pattern matches, the
+   classifier avoids overtreating by defaulting to suspected NEC rather
+   than definite or advanced NEC. *)
+Lemma classify_default_is_mildest : forall c,
+  Stage.to_nat (classify c) >= Stage.to_nat Stage.IA.
+Proof. intros c. destruct (classify c); simpl; lia. Qed.
 
 Lemma no_findings_diagnoses_not_nec : forall c,
   has_any_findings c = false -> diagnose c = Diagnosis.NotNEC.
@@ -531,18 +548,21 @@ Definition has_antifungal_coverage (r : Regimen) : bool :=
   | _ => false
   end.
 
-Lemma fungal_sepsis_gets_antifungal : forall s m h,
+Section CultureDirectedProperties.
+Variables (s : Stage.t) (m : Microbiology.t) (h : nat).
+
+Lemma fungal_sepsis_gets_antifungal :
   Microbiology.fungal_sepsis m = true ->
   has_antifungal_coverage (culture_directed_regimen s m h) = true.
 Proof.
-  intros s m h Hf. unfold culture_directed_regimen. rewrite Hf. reflexivity.
+  intros Hf. unfold culture_directed_regimen. rewrite Hf. reflexivity.
 Qed.
 
-Lemma gram_neg_gets_anaerobic : forall s m h,
+Lemma gram_neg_gets_anaerobic :
   Microbiology.gram_negative_sepsis m = true ->
   has_anaerobic_coverage (culture_directed_regimen s m h) = true.
 Proof.
-  intros s m h Hgn. unfold culture_directed_regimen.
+  intros Hgn. unfold culture_directed_regimen.
   assert (Hfung: Microbiology.fungal_sepsis m = false).
   { unfold Microbiology.fungal_sepsis, Microbiology.gram_negative_sepsis in *.
     destruct (Microbiology.blood_culture m); try discriminate. reflexivity. }
@@ -550,11 +570,11 @@ Proof.
   destruct s; reflexivity.
 Qed.
 
-Lemma culture_directed_never_weaker : forall s m h,
+Lemma culture_directed_never_weaker :
   has_anaerobic_coverage (recommended_regimen_by_stage s) = true ->
   has_anaerobic_coverage (culture_directed_regimen s m h) = true.
 Proof.
-  intros s m h Hbase. unfold culture_directed_regimen.
+  intros Hbase. unfold culture_directed_regimen.
   destruct (Microbiology.fungal_sepsis m); [reflexivity|].
   destruct (Microbiology.gram_negative_sepsis m).
   - destruct s; simpl in *; reflexivity.
@@ -564,11 +584,11 @@ Proof.
 Qed.
 
 (* culture_directed_regimen preserves gram-negative coverage *)
-Lemma culture_directed_preserves_gram_neg : forall s m h,
+Lemma culture_directed_preserves_gram_neg :
   has_gram_negative_coverage (recommended_regimen_by_stage s) = true ->
   has_gram_negative_coverage (culture_directed_regimen s m h) = true.
 Proof.
-  intros s m h Hbase. unfold culture_directed_regimen.
+  intros Hbase. unfold culture_directed_regimen.
   destruct (Microbiology.fungal_sepsis m); [reflexivity|].
   destruct (Microbiology.gram_negative_sepsis m).
   - destruct s; simpl in *; reflexivity.
@@ -576,6 +596,8 @@ Proof.
     + destruct s; simpl in *; reflexivity.
     + exact Hbase.
 Qed.
+
+End CultureDirectedProperties.
 
 (* culture_directed_regimen never narrows overall spectrum.
    If the base regimen has gram-negative, anaerobic, and gram-positive

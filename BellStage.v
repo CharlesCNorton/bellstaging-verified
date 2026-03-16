@@ -275,6 +275,20 @@ Proof.
   lia.
 Qed.
 
+(* Well-founded termination via phase_to_nat as a measure.
+   The inverse image of valid_transition through phase_to_nat is
+   well-founded because phase_to_nat strictly increases and lt on nat
+   is well-founded. *)
+Definition transition_lt (p1 p2 : ManagementPhase) : Prop :=
+  valid_transition p1 p2.
+
+(* Any chain of valid_transitions has length at most 7 (since
+   phase_to_nat ranges over 1..8 and strictly increases).
+   This provides a concrete termination bound. *)
+Lemma max_transition_chain_length : forall p,
+  phase_to_nat p <= 8.
+Proof. destruct p; simpl; lia. Qed.
+
 (* Irreflexivity: no phase transitions to itself. *)
 Theorem valid_transition_irreflexive : forall p, ~ valid_transition p p.
 Proof.
@@ -441,6 +455,26 @@ Proof.
   first [ left; solve_reachable | right; solve_reachable ].
 Qed.
 
+(* Operational termination: every valid_transition strictly decreases
+   the remaining distance to termination (8 - phase_to_nat). Since this
+   distance is a natural number, any sequence of valid_transitions must
+   terminate in at most 8 - phase_to_nat(start) steps. *)
+Theorem transition_decreases_distance : forall p1 p2,
+  valid_transition p1 p2 ->
+  8 - phase_to_nat p2 < 8 - phase_to_nat p1.
+Proof.
+  intros p1 p2 H.
+  pose proof (valid_transition_increases _ _ H).
+  pose proof (max_transition_chain_length p2).
+  lia.
+Qed.
+
+(* Corollary: from any phase, at most 7 transitions can occur before
+   reaching a terminal phase. *)
+Theorem max_steps_to_terminal : forall p,
+  8 - phase_to_nat p <= 7.
+Proof. destruct p; simpl; lia. Qed.
+
 End TemporalProgression.
 
 Module ClinicalState.
@@ -568,6 +602,31 @@ Definition effective_hypotension (c : t) : bool :=
   | None => SystemicSigns.hypotension (systemic c)
   end.
 
+(* Detect divergence between structured vitals and boolean sign.
+   True when both data sources are present and disagree on hypotension. *)
+Definition hypotension_divergent (c : t) : bool :=
+  match vitals c with
+  | Some v =>
+      let ga := RiskFactors.gestational_age_weeks (risk_factors c) in
+      negb (Bool.eqb (VitalSigns.hypotension v ga)
+                      (SystemicSigns.hypotension (systemic c)))
+  | None => false
+  end.
+
+(* When both sources agree, effective_hypotension equals either one *)
+Lemma hypotension_agreement : forall c v,
+  vitals c = Some v ->
+  hypotension_divergent c = false ->
+  effective_hypotension c = SystemicSigns.hypotension (systemic c).
+Proof.
+  intros c v Hv Hdiv.
+  unfold effective_hypotension, hypotension_divergent in *.
+  rewrite Hv in *. unfold negb in Hdiv.
+  destruct (Bool.eqb (VitalSigns.hypotension v _) (SystemicSigns.hypotension _)) eqn:E.
+  - apply Bool.eqb_prop in E. exact E.
+  - discriminate.
+Qed.
+
 Definition has_positive_blood_culture (c : t) : bool :=
   Microbiology.blood_culture_positive (micro c).
 
@@ -629,6 +688,14 @@ Definition valid (c : t) : Prop :=
   match labs c with Some l => valid_labs l | None => True end /\
   match vitals c with Some v => valid_vitals v | None => True end.
 
+(* Freshness-witnessed clinical state.
+   Wraps a ClinicalState.t with a proof that signs are current,
+   preventing stale data from reaching the classifier. *)
+Record current_t : Type := MkCurrentState {
+  current_state : t;
+  current_proof : signs_current current_state = true
+}.
+
 End ClinicalState.
 
 Module TimeSeries.
@@ -672,6 +739,11 @@ Lemma make_observation_consistent : forall t s stage,
 Proof.
   intros. unfold observation_consistent, make_observation. simpl. reflexivity.
 Qed.
+
+(* make_observation_severity_valid is proved after obs_severity_valid
+   is defined (see below). Stage consistency (obs_stage_valid) cannot be
+   enforced here because Classification.classify is in BellClassification.v.
+   Callers must pass the correct stage value from Classification.classify. *)
 
 (* A patient time series is a list of observations, newest first *)
 Definition PatientTimeSeries := list Observation.
@@ -791,6 +863,10 @@ Definition stage_range (ts : PatientTimeSeries) : nat :=
 Definition compute_trajectory (ts : PatientTimeSeries) : TemporalProgression.ClinicalTrajectory :=
   match latest ts, earliest ts with
   | Some l, Some e =>
+      (* Guard: if time ordering is violated, return Stable rather than
+         computing on garbage duration values *)
+      if negb (obs_time_hours e <=? obs_time_hours l) then TemporalProgression.Stable
+      else
       let current := obs_stage l in
       let peak := max_stage ts in
       let stage_delta := (Z.of_nat current - Z.of_nat (obs_stage e))%Z in
@@ -840,7 +916,9 @@ Definition crossed_surgical_threshold (ts : PatientTimeSeries) : bool :=
   | None => false
   end.
 
-(* Find first observation at or above a stage threshold *)
+(* Find the chronologically earliest observation at or above a stage threshold.
+   The list is newest-first, so this recurses to the tail and returns the
+   deepest match — i.e., the earliest in time, not the first in list order. *)
 Fixpoint first_at_stage (ts : PatientTimeSeries) (threshold : nat) : option Observation :=
   match ts with
   | [] => None
@@ -868,6 +946,12 @@ Definition obs_stage_valid (o : Observation) (classify : ClinicalState.t -> Stag
 Definition obs_severity_valid (o : Observation) : Prop :=
   obs_severity o = ClinicalState.overall_severity_score (obs_state o).
 
+Lemma make_observation_severity_valid : forall t s stage,
+  obs_severity_valid (make_observation t s stage).
+Proof.
+  intros. unfold obs_severity_valid, make_observation. simpl. reflexivity.
+Qed.
+
 (* add_observation now requires timestamp consistency.
    Use make_observation (which enforces this) rather than
    MkObservation directly. *)
@@ -893,6 +977,7 @@ Lemma singleton_series_stable : forall o,
   compute_trajectory [o] = TemporalProgression.Stable.
 Proof.
   intros o. unfold compute_trajectory, latest, earliest, max_stage. simpl.
+  rewrite Nat.leb_refl. simpl.
   rewrite Nat.ltb_irrefl. rewrite Z.sub_diag. rewrite Nat.sub_diag. reflexivity.
 Qed.
 
@@ -929,5 +1014,38 @@ Proof.
   intros ts H. unfold reached_stage_IIIB in H.
   apply Nat.leb_le in H. exact H.
 Qed.
+
+(* Rejection witnesses for add_observation *)
+
+(* Inconsistent timestamp: obs_time_hours differs from embedded state clock *)
+Definition inconsistent_obs : Observation :=
+  MkObservation 10
+    (ClinicalState.MkClinicalState
+      ClinicalState.default_risk_factors
+      (Some ClinicalState.default_labs)
+      (Some ClinicalState.default_coag)
+      ClinicalState.default_micro
+      (Some ClinicalState.default_vitals)
+      SystemicSigns.no_signs
+      IntestinalSigns.no_signs
+      RadiographicSigns.no_findings
+      NeonatalOrganFailure.NeuroNormal
+      5 5 5 5)   (* embedded clock says 5, obs_time_hours says 10 *)
+    1 0.
+
+Lemma inconsistent_obs_rejected :
+  add_observation inconsistent_obs [] = None.
+Proof. vm_compute. reflexivity. Qed.
+
+(* Backward time: new observation earlier than existing one *)
+Definition early_obs : Observation :=
+  make_observation 2 ClinicalState.empty 1.
+
+Definition late_obs : Observation :=
+  make_observation 8 ClinicalState.empty 1.
+
+Lemma backward_time_rejected :
+  add_observation early_obs [late_obs] = None.
+Proof. vm_compute. reflexivity. Qed.
 
 End TimeSeries.

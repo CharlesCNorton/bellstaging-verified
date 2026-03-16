@@ -6,6 +6,11 @@ From Stdlib Require Import Lia.
 
 Import ListNotations.
 
+(* Naming convention: modules that define a single primary type use `t`
+   (Coq stdlib style). Auxiliary record types within a module use
+   descriptive names (e.g., MedicationRiskFactors, UltrasoundFindings).
+   Both are accessed via module qualification. *)
+
 Module ClinicalParameters.
 
 Record ClinicalParam : Type := MkParam {
