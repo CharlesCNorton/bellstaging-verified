@@ -17,7 +17,9 @@ Recursive Extraction
   Classification.classify_checked
   Classification.diagnose
   Classification.urgency_from_trajectory
-  Classification.recommended_reassess_hours
+  TrajectoryClassification.recommended_reassess_hours
+  TrajectoryClassification.classify_with_trajectory
+  TrajectoryClassification.escalation_warranted
   Treatment.of_stage
   Treatment.requires_surgery
   SurgicalIndications.surgery_indicated

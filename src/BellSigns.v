@@ -292,6 +292,110 @@ Proof.
   exact H3.
 Qed.
 
+(* --- Decision cascade ordering theorems for most_likely_diagnosis ---
+   The cascade structure is:
+   pneumatosis -> NEC
+   else volvulus pattern -> Volvulus
+   else sepsis without abdominal findings -> Sepsis
+   else sip_confidence < nec_confidence -> NEC
+   else nec_confidence < sip_confidence -> SIP
+   else feeding intolerance history -> NEC
+   else SIP clinical pattern -> SIP
+   else FeedingIntolerance.
+   One theorem per edge proves the exact guard under which each branch
+   fires. *)
+
+Lemma cascade_volvulus : forall f,
+  has_pneumatosis f = false ->
+  suggests_volvulus f = true ->
+  most_likely_diagnosis f = Volvulus.
+Proof.
+  intros f Hp Hv. unfold most_likely_diagnosis.
+  rewrite Hp, Hv. reflexivity.
+Qed.
+
+Lemma cascade_sepsis : forall f,
+  has_pneumatosis f = false ->
+  suggests_volvulus f = false ->
+  suggests_sepsis_without_nec f = true ->
+  most_likely_diagnosis f = Sepsis.
+Proof.
+  intros f Hp Hv Hs. unfold most_likely_diagnosis.
+  rewrite Hp, Hv, Hs. reflexivity.
+Qed.
+
+Lemma cascade_nec_confidence : forall f,
+  has_pneumatosis f = false ->
+  suggests_volvulus f = false ->
+  suggests_sepsis_without_nec f = false ->
+  sip_confidence f < nec_confidence f ->
+  most_likely_diagnosis f = NEC.
+Proof.
+  intros f Hp Hv Hs Hlt. unfold most_likely_diagnosis.
+  rewrite Hp, Hv, Hs.
+  destruct (sip_confidence f <? nec_confidence f) eqn:E; [reflexivity|].
+  apply Nat.ltb_ge in E. lia.
+Qed.
+
+Lemma cascade_sip_confidence : forall f,
+  has_pneumatosis f = false ->
+  suggests_volvulus f = false ->
+  suggests_sepsis_without_nec f = false ->
+  nec_confidence f < sip_confidence f ->
+  most_likely_diagnosis f = SpontaneousIntestinalPerforation.
+Proof.
+  intros f Hp Hv Hs Hlt. unfold most_likely_diagnosis.
+  rewrite Hp, Hv, Hs.
+  destruct (sip_confidence f <? nec_confidence f) eqn:E1.
+  { apply Nat.ltb_lt in E1. lia. }
+  destruct (nec_confidence f <? sip_confidence f) eqn:E2; [reflexivity|].
+  apply Nat.ltb_ge in E2. lia.
+Qed.
+
+Lemma cascade_feeding_intol_tiebreak : forall f,
+  has_pneumatosis f = false ->
+  suggests_volvulus f = false ->
+  suggests_sepsis_without_nec f = false ->
+  sip_confidence f = nec_confidence f ->
+  has_preceding_feeding_intolerance f = true ->
+  most_likely_diagnosis f = NEC.
+Proof.
+  intros f Hp Hv Hs Heq Hfi. unfold most_likely_diagnosis.
+  rewrite Hp, Hv, Hs.
+  rewrite Heq, Nat.ltb_irrefl.
+  rewrite Hfi. reflexivity.
+Qed.
+
+Lemma cascade_sip_pattern : forall f,
+  has_pneumatosis f = false ->
+  suggests_volvulus f = false ->
+  suggests_sepsis_without_nec f = false ->
+  sip_confidence f = nec_confidence f ->
+  has_preceding_feeding_intolerance f = false ->
+  suggests_sip f = true ->
+  most_likely_diagnosis f = SpontaneousIntestinalPerforation.
+Proof.
+  intros f Hp Hv Hs Heq Hfi Hsip. unfold most_likely_diagnosis.
+  rewrite Hp, Hv, Hs, Heq, Nat.ltb_irrefl, Hfi, Hsip. reflexivity.
+Qed.
+
+Lemma cascade_feeding_intolerance_fallback : forall f,
+  has_pneumatosis f = false ->
+  suggests_volvulus f = false ->
+  suggests_sepsis_without_nec f = false ->
+  sip_confidence f = nec_confidence f ->
+  has_preceding_feeding_intolerance f = false ->
+  suggests_sip f = false ->
+  most_likely_diagnosis f = FeedingIntolerance.
+Proof.
+  intros f Hp Hv Hs Heq Hfi Hsip. unfold most_likely_diagnosis.
+  rewrite Hp, Hv, Hs, Heq, Nat.ltb_irrefl, Hfi, Hsip. reflexivity.
+Qed.
+
+(* Age-adjusted demotion threshold routed through ClinicalParameters. *)
+Definition age_adjust_demotion : nat :=
+  ClinicalParameters.param_value ClinicalParameters.age_adjust_demotion_threshold.
+
 (* Age-adjusted differential diagnosis integrating likelihood functions *)
 Definition age_adjusted_diagnosis (f : DifferentialFeatures)
     (ga_weeks day_of_life : nat) : GIDifferential :=
@@ -300,12 +404,50 @@ Definition age_adjusted_diagnosis (f : DifferentialFeatures)
   let volv_adj := age_adjusted_volvulus_likelihood day_of_life in
   let sip_adj := age_adjusted_sip_likelihood ga_weeks in
   match base with
-  | NEC => if nec_adj <? 2 then FeedingIntolerance else NEC
-  | Volvulus => if volv_adj <? 2 then base else Volvulus
+  | NEC => if nec_adj <? age_adjust_demotion then FeedingIntolerance else NEC
+  | Volvulus => if volv_adj <? age_adjust_demotion then base else Volvulus
   | SpontaneousIntestinalPerforation =>
-      if sip_adj <? 2 then NEC else SpontaneousIntestinalPerforation
+      if sip_adj <? age_adjust_demotion then NEC else SpontaneousIntestinalPerforation
   | _ => base
   end.
+
+(* Contract: if the base diagnosis is NEC and the age-adjusted NEC likelihood
+   meets the demotion threshold, the age-adjusted diagnosis preserves NEC. *)
+Lemma age_adjusted_preserves_nec : forall f ga dol,
+  most_likely_diagnosis f = NEC ->
+  age_adjust_demotion <= age_adjusted_nec_likelihood ga dol ->
+  age_adjusted_diagnosis f ga dol = NEC.
+Proof.
+  intros f ga dol Hbase Hge. unfold age_adjusted_diagnosis.
+  rewrite Hbase.
+  destruct (age_adjusted_nec_likelihood ga dol <? age_adjust_demotion) eqn:E.
+  - apply Nat.ltb_lt in E. lia.
+  - reflexivity.
+Qed.
+
+Lemma age_adjusted_preserves_volvulus : forall f ga dol,
+  most_likely_diagnosis f = Volvulus ->
+  age_adjust_demotion <= age_adjusted_volvulus_likelihood dol ->
+  age_adjusted_diagnosis f ga dol = Volvulus.
+Proof.
+  intros f ga dol Hbase Hge. unfold age_adjusted_diagnosis.
+  rewrite Hbase.
+  destruct (age_adjusted_volvulus_likelihood dol <? age_adjust_demotion) eqn:E.
+  - apply Nat.ltb_lt in E. lia.
+  - reflexivity.
+Qed.
+
+Lemma age_adjusted_preserves_sip : forall f ga dol,
+  most_likely_diagnosis f = SpontaneousIntestinalPerforation ->
+  age_adjust_demotion <= age_adjusted_sip_likelihood ga ->
+  age_adjusted_diagnosis f ga dol = SpontaneousIntestinalPerforation.
+Proof.
+  intros f ga dol Hbase Hge. unfold age_adjusted_diagnosis.
+  rewrite Hbase.
+  destruct (age_adjusted_sip_likelihood ga <? age_adjust_demotion) eqn:E.
+  - apply Nat.ltb_lt in E. lia.
+  - reflexivity.
+Qed.
 
 End DifferentialDiagnosis.
 

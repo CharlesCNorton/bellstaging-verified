@@ -5,6 +5,8 @@ src/BellStage.v
 src/BellClassification.v
 src/BellCriteriaDecl.v
 src/BellWitnesses.v
+src/BellSerialization.v
+src/BellCalibration.v
 src/BellModeling.v
 src/BellExtraction.v
 src/BellStagingQC.v

@@ -5,7 +5,7 @@ synopsis: "Verified Bell staging criteria for necrotizing enterocolitis"
 maintainer: "CharlesCNorton"
 license: "MIT"
 depends: [
-  "rocq-prover" {>= "9.0" & < "9.1~"}
+  "rocq-prover" {>= "9.0" & < "9.2~"}
   "coq-quickchick" {with-test}
 ]
 build: [

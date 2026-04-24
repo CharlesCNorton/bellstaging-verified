@@ -176,19 +176,19 @@ Proof. reflexivity. Qed.
 
 (* Observation at hour 0: Stage IA *)
 Definition obs_hour_0 : TimeSeries.Observation :=
-  TimeSeries.MkObservation 0 stage_IA_witness 1 5.
+  TimeSeries.MkObservation 0 stage_IA_witness.
 
 (* Observation at hour 6: Stage IIA (worsening) *)
 Definition obs_hour_6 : TimeSeries.Observation :=
-  TimeSeries.MkObservation 6 stage_IIA_witness 3 12.
+  TimeSeries.MkObservation 6 stage_IIA_witness.
 
 (* Observation at hour 12: Stage IIB (continued worsening) *)
 Definition obs_hour_12 : TimeSeries.Observation :=
-  TimeSeries.MkObservation 12 stage_IIB_witness 4 15.
+  TimeSeries.MkObservation 12 stage_IIB_witness.
 
 (* Observation at hour 24: Stage IIIA (severe) *)
 Definition obs_hour_24 : TimeSeries.Observation :=
-  TimeSeries.MkObservation 24 stage_IIIA_witness 5 18.
+  TimeSeries.MkObservation 24 stage_IIIA_witness.
 
 (* Time series showing progressive deterioration over 24 hours *)
 Definition deteriorating_series : TimeSeries.PatientTimeSeries :=
@@ -196,8 +196,8 @@ Definition deteriorating_series : TimeSeries.PatientTimeSeries :=
 
 (* Time series showing stable course *)
 Definition stable_series : TimeSeries.PatientTimeSeries :=
-  [obs_hour_6; TimeSeries.MkObservation 3 stage_IIA_witness 3 12;
-   TimeSeries.MkObservation 0 stage_IIA_witness 3 11].
+  [obs_hour_6; TimeSeries.MkObservation 3 stage_IIA_witness;
+   TimeSeries.MkObservation 0 stage_IIA_witness].
 
 Lemma deteriorating_series_is_worsening :
   TimeSeries.is_worsening deteriorating_series = true.

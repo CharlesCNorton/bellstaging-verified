@@ -85,6 +85,26 @@ Definition diagnose (c : ClinicalState.t) : Diagnosis.t :=
 Definition classify (c : ClinicalState.t) : Stage.t :=
   classify_stage c.
 
+(* Returns None when the input fails ClinicalState.is_valid. *)
+Definition classify_validated (c : ClinicalState.t) : option Stage.t :=
+  if ClinicalState.is_valid c then Some (classify c) else None.
+
+Lemma classify_validated_some_iff_valid : forall c s,
+  classify_validated c = Some s -> ClinicalState.valid c.
+Proof.
+  intros c s H. unfold classify_validated in H.
+  destruct (ClinicalState.is_valid c) eqn:E; [|discriminate].
+  apply ClinicalState.is_valid_iff. exact E.
+Qed.
+
+Lemma classify_validated_agrees_on_valid : forall c,
+  ClinicalState.valid c ->
+  classify_validated c = Some (classify c).
+Proof.
+  intros c Hv. unfold classify_validated.
+  apply ClinicalState.is_valid_iff in Hv. rewrite Hv. reflexivity.
+Qed.
+
 (* Staleness-guarded classifier: returns None if signs are stale *)
 Definition classify_checked (c : ClinicalState.t) : option Stage.t :=
   if ClinicalState.signs_current c then Some (classify_stage c)
@@ -121,6 +141,42 @@ Lemma pneumoperitoneum_forces_IIIB : forall c,
 Proof.
   intros c H. unfold classify, classify_stage. rewrite H. reflexivity.
 Qed.
+
+(* classify_stage reaches IIA on definite_nec_findings (pneumatosis)
+   AND intestinal stage2_signs, without requiring systemic signs.
+   This deviates from strict Bell 1978 / Walsh-Kliegman 1986, which
+   require systemic involvement at all stages. Pneumatosis intestinalis
+   is pathognomonic and waiting for systemic signs can delay diagnosis
+   (Kliegman & Walsh 1987, Pediatr Clin North Am 34:1). *)
+Theorem classify_IIA_relaxes_systemic : forall c,
+  classify c = Stage.IIA ->
+  RadiographicSigns.definite_nec_findings (ClinicalState.radiographic c) = true /\
+  IntestinalSigns.stage2_signs (ClinicalState.intestinal c) = true.
+Proof.
+  intros c H.
+  assert (E : RadiographicSigns.definite_nec_findings (ClinicalState.radiographic c) &&
+              IntestinalSigns.stage2_signs (ClinicalState.intestinal c) = true).
+  { unfold classify, classify_stage in H.
+    destruct (RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c));
+      [discriminate|].
+    destruct ((SystemicSigns.stage3_signs _ || _ || _ || _)
+              && IntestinalSigns.stage3_signs _
+              && (RadiographicSigns.stage2a_findings _ ||
+                  RadiographicSigns.stage2b_findings _))%bool;
+      [discriminate|].
+    destruct ((SystemicSigns.stage2b_signs _ || _ || _ ||
+               IntestinalSigns.stage2b_signs _)
+              && IntestinalSigns.stage2_signs _
+              && RadiographicSigns.stage2b_findings _)%bool;
+      [discriminate|].
+    destruct (RadiographicSigns.definite_nec_findings _ &&
+              IntestinalSigns.stage2_signs _)%bool.
+    - reflexivity.
+    - destruct (IntestinalSigns.stage1b_signs _ &&
+                SystemicSigns.stage1_signs _)%bool; discriminate. }
+  apply andb_true_iff in E. exact E.
+Qed.
+
 
 Lemma classify_always_valid : forall c,
   1 <= Stage.to_nat (classify c) <= Stage.stage_count.
@@ -165,16 +221,7 @@ Proof.
   intros c H. unfold diagnose. rewrite H. reflexivity.
 Qed.
 
-(* Trajectory-aware classification using time series *)
-
-(* Classify based on latest observation in time series *)
-Definition classify_from_series (ts : TimeSeries.PatientTimeSeries) : option Stage.t :=
-  match TimeSeries.latest ts with
-  | Some obs => Some (classify (TimeSeries.obs_state obs))
-  | None => None
-  end.
-
-(* Get trajectory-adjusted urgency level *)
+(* Urgency levels for trajectory-aware classification. *)
 Inductive UrgencyLevel : Type :=
   | Routine : UrgencyLevel
   | Elevated : UrgencyLevel
@@ -229,48 +276,6 @@ Record TrajectoryAwareClassification : Type := MkTrajectoryAware {
   tac_hours_at_current_stage : nat
 }.
 
-Definition classify_with_trajectory (ts : TimeSeries.PatientTimeSeries)
-    : option TrajectoryAwareClassification :=
-  match TimeSeries.latest ts with
-  | Some obs =>
-      let stage := classify (TimeSeries.obs_state obs) in
-      let traj := TimeSeries.compute_trajectory ts in
-      let urg := urgency_from_trajectory traj stage in
-      let esc := TimeSeries.count_escalations ts in
-      let hrs := match TimeSeries.first_at_stage ts (Stage.to_nat stage) with
-                 | Some first_obs =>
-                     TimeSeries.obs_time_hours obs - TimeSeries.obs_time_hours first_obs
-                 | None => 0
-                 end in
-      Some (MkTrajectoryAware stage traj urg esc hrs)
-  | None => None
-  end.
-
-(* Determine if escalation of care is warranted based on trajectory *)
-Definition escalation_warranted (ts : TimeSeries.PatientTimeSeries) : bool :=
-  match classify_with_trajectory ts with
-  | Some tac =>
-      match tac_urgency tac with
-      | Emergent => true
-      | Urgent => true
-      | _ => false
-      end
-  | None => false
-  end.
-
-(* Recommend reassessment interval based on trajectory *)
-Definition recommended_reassess_hours (ts : TimeSeries.PatientTimeSeries) : nat :=
-  match classify_with_trajectory ts with
-  | Some tac =>
-      match tac_urgency tac with
-      | Emergent => 1
-      | Urgent => 2
-      | Elevated => 4
-      | Routine => 8
-      end
-  | None => 8
-  end.
-
 Lemma rapid_deterioration_always_emergent : forall stage,
   urgency_from_trajectory TemporalProgression.RapidDeterioration stage = Emergent.
 Proof. solve_stage. Qed.
@@ -318,6 +323,406 @@ Qed.
 
 End Classification.
 
+Module TimeSeries.
+
+(* An observation is a clinical state at a specific time.
+   obs_stage and obs_severity are derived from obs_state through
+   Classification.classify and ClinicalState.overall_severity_score. *)
+Record Observation : Type := MkObservation {
+  obs_time_hours : nat;
+  obs_state : ClinicalState.t
+}.
+
+Definition obs_stage (o : Observation) : nat :=
+  Stage.to_nat (Classification.classify (obs_state o)).
+
+Definition obs_severity (o : Observation) : nat :=
+  ClinicalState.overall_severity_score (obs_state o).
+
+(* Consistency invariant: obs_time_hours matches the embedded clinical state's
+   hours_since_symptom_onset. *)
+Definition observation_consistent (o : Observation) : Prop :=
+  obs_time_hours o = ClinicalState.hours_since_symptom_onset (obs_state o).
+
+(* Create observation from clinical state. Stage is derived from the state
+   via Classification.classify so the obs_stage cache invariant holds by
+   construction. *)
+Definition make_observation (time_h : nat) (state : ClinicalState.t) : Observation :=
+  MkObservation time_h
+    (ClinicalState.MkClinicalState
+      (ClinicalState.risk_factors state)
+      (ClinicalState.labs state)
+      (ClinicalState.coag state)
+      (ClinicalState.micro state)
+      (ClinicalState.vitals state)
+      (ClinicalState.systemic state)
+      (ClinicalState.intestinal state)
+      (ClinicalState.radiographic state)
+      (ClinicalState.neuro_status state)
+      time_h
+      (ClinicalState.systemic_assessed_h state)
+      (ClinicalState.intestinal_assessed_h state)
+      (ClinicalState.radiographic_assessed_h state)).
+
+Lemma make_observation_consistent : forall t s,
+  observation_consistent (make_observation t s).
+Proof.
+  intros. unfold observation_consistent, make_observation. simpl. reflexivity.
+Qed.
+
+(* Stage cache invariant: by construction obs_stage o = classify (obs_state o). *)
+Lemma obs_stage_derived : forall o,
+  obs_stage o = Stage.to_nat (Classification.classify (obs_state o)).
+Proof. reflexivity. Qed.
+
+Lemma obs_severity_derived : forall o,
+  obs_severity o = ClinicalState.overall_severity_score (obs_state o).
+Proof. reflexivity. Qed.
+
+(* A patient time series is a list of observations, newest first *)
+Definition PatientTimeSeries := list Observation.
+
+(* Time series must be ordered by time *)
+Fixpoint is_time_ordered (ts : PatientTimeSeries) : bool :=
+  match ts with
+  | [] => true
+  | [_] => true
+  | o1 :: ((o2 :: _) as rest) =>
+      (obs_time_hours o2 <=? obs_time_hours o1) && is_time_ordered rest
+  end.
+
+Definition latest (ts : PatientTimeSeries) : option Observation :=
+  match ts with
+  | [] => None
+  | o :: _ => Some o
+  end.
+
+Fixpoint earliest (ts : PatientTimeSeries) : option Observation :=
+  match ts with
+  | [] => None
+  | [o] => Some o
+  | _ :: rest => earliest rest
+  end.
+
+Definition series_length (ts : PatientTimeSeries) : nat := length ts.
+
+Definition series_duration (ts : PatientTimeSeries) : nat :=
+  match latest ts, earliest ts with
+  | Some l, Some e =>
+      if obs_time_hours e <=? obs_time_hours l
+      then obs_time_hours l - obs_time_hours e
+      else 0
+  | _, _ => 0
+  end.
+
+Definition stage_at_index (ts : PatientTimeSeries) (idx : nat) : option nat :=
+  match nth_error ts idx with
+  | Some o => Some (obs_stage o)
+  | None => None
+  end.
+
+Definition stage_change (ts : PatientTimeSeries) (earlier_idx later_idx : nat) : option Z :=
+  match stage_at_index ts later_idx, stage_at_index ts earlier_idx with
+  | Some s2, Some s1 => Some (Z.of_nat s2 - Z.of_nat s1)%Z
+  | _, _ => None
+  end.
+
+Definition is_worsening (ts : PatientTimeSeries) : bool :=
+  match latest ts, earliest ts with
+  | Some l, Some e => obs_stage e <? obs_stage l
+  | _, _ => false
+  end.
+
+Definition is_improving (ts : PatientTimeSeries) : bool :=
+  match latest ts, earliest ts with
+  | Some l, Some e => obs_stage l <? obs_stage e
+  | _, _ => false
+  end.
+
+Definition is_stable (ts : PatientTimeSeries) : bool :=
+  match latest ts, earliest ts with
+  | Some l, Some e => obs_stage l =? obs_stage e
+  | _, _ => true
+  end.
+
+Fixpoint count_escalations (ts : PatientTimeSeries) : nat :=
+  match ts with
+  | [] | [_] => 0
+  | o1 :: ((o2 :: _) as rest) =>
+      (if obs_stage o2 <? obs_stage o1 then 1 else 0) + count_escalations rest
+  end.
+
+Fixpoint count_improvements (ts : PatientTimeSeries) : nat :=
+  match ts with
+  | [] | [_] => 0
+  | o1 :: ((o2 :: _) as rest) =>
+      (if obs_stage o1 <? obs_stage o2 then 1 else 0) + count_improvements rest
+  end.
+
+Fixpoint max_stage (ts : PatientTimeSeries) : nat :=
+  match ts with
+  | [] => 0
+  | [o] => obs_stage o
+  | o :: rest => Nat.max (obs_stage o) (max_stage rest)
+  end.
+
+Fixpoint min_stage (ts : PatientTimeSeries) : nat :=
+  match ts with
+  | [] => 0
+  | [o] => obs_stage o
+  | o :: rest => Nat.min (obs_stage o) (min_stage rest)
+  end.
+
+Definition stage_range (ts : PatientTimeSeries) : nat :=
+  max_stage ts - min_stage ts.
+
+Definition compute_trajectory (ts : PatientTimeSeries) : TemporalProgression.ClinicalTrajectory :=
+  match latest ts, earliest ts with
+  | Some l, Some e =>
+      if negb (obs_time_hours e <=? obs_time_hours l) then TemporalProgression.Stable
+      else
+      let current := obs_stage l in
+      let peak := max_stage ts in
+      let stage_delta := (Z.of_nat current - Z.of_nat (obs_stage e))%Z in
+      let duration := obs_time_hours l - obs_time_hours e in
+      if current <? peak then
+        if (stage_delta >? 0)%Z then TemporalProgression.Worsening
+        else if (stage_delta <? 0)%Z then TemporalProgression.Improving
+        else TemporalProgression.Stable
+      else
+      if (duration =? 0) then TemporalProgression.Stable
+      else if (stage_delta * 240 >? 20 * Z.of_nat duration)%Z then TemporalProgression.RapidDeterioration
+      else if (stage_delta >? 0)%Z then TemporalProgression.Worsening
+      else if (stage_delta <? 0)%Z then TemporalProgression.Improving
+      else TemporalProgression.Stable
+  | _, _ => TemporalProgression.Stable
+  end.
+
+Definition stage_velocity_x10 (ts : PatientTimeSeries) : Z :=
+  match latest ts, earliest ts with
+  | Some l, Some e =>
+      let stage_delta := (Z.of_nat (obs_stage l) - Z.of_nat (obs_stage e))%Z in
+      let duration := obs_time_hours l - obs_time_hours e in
+      if duration =? 0 then 0%Z
+      else ((stage_delta * 240) / Z.of_nat duration)%Z
+  | _, _ => 0%Z
+  end.
+
+Definition severity_trend (ts : PatientTimeSeries) : Z :=
+  match latest ts, earliest ts with
+  | Some l, Some e =>
+      (Z.of_nat (obs_severity l) - Z.of_nat (obs_severity e))%Z
+  | _, _ => 0%Z
+  end.
+
+Definition reached_stage_IIIB (ts : PatientTimeSeries) : bool :=
+  6 <=? max_stage ts.
+
+Definition crossed_surgical_threshold (ts : PatientTimeSeries) : bool :=
+  match earliest ts with
+  | Some e => (obs_stage e <? 6) && reached_stage_IIIB ts
+  | None => false
+  end.
+
+Fixpoint first_at_stage (ts : PatientTimeSeries) (threshold : nat) : option Observation :=
+  match ts with
+  | [] => None
+  | o :: rest =>
+      match first_at_stage rest threshold with
+      | Some found => Some found
+      | None => if threshold <=? obs_stage o then Some o else None
+      end
+  end.
+
+Definition time_to_stage (ts : PatientTimeSeries) (threshold : nat) : option nat :=
+  match first_at_stage ts threshold, earliest ts with
+  | Some target, Some start => Some (obs_time_hours target - obs_time_hours start)
+  | _, _ => None
+  end.
+
+Definition add_observation (obs : Observation) (ts : PatientTimeSeries) : option PatientTimeSeries :=
+  match ts with
+  | [] =>
+      if obs_time_hours obs =? ClinicalState.hours_since_symptom_onset (obs_state obs)
+      then Some [obs]
+      else None
+  | prev :: _ =>
+      if (obs_time_hours prev <=? obs_time_hours obs) &&
+         (obs_time_hours obs =? ClinicalState.hours_since_symptom_onset (obs_state obs))
+      then Some (obs :: ts)
+      else None
+  end.
+
+Lemma empty_series_stable : compute_trajectory [] = TemporalProgression.Stable.
+Proof. reflexivity. Qed.
+
+Lemma singleton_series_stable : forall o,
+  compute_trajectory [o] = TemporalProgression.Stable.
+Proof.
+  intros o. unfold compute_trajectory, latest, earliest, max_stage. simpl.
+  rewrite Nat.leb_refl. simpl.
+  rewrite Nat.ltb_irrefl. rewrite Z.sub_diag. rewrite Nat.sub_diag. reflexivity.
+Qed.
+
+Lemma worsening_implies_not_improving : forall ts,
+  is_time_ordered ts = true ->
+  is_worsening ts = true -> is_improving ts = false.
+Proof.
+  intros ts _ H.
+  unfold is_worsening, is_improving in *.
+  destruct (latest ts) as [l|]; destruct (earliest ts) as [e|]; try discriminate.
+  apply Nat.ltb_lt in H.
+  apply Nat.ltb_ge. lia.
+Qed.
+
+Lemma stable_implies_no_escalations_single : forall o,
+  count_escalations [o] = 0.
+Proof. reflexivity. Qed.
+
+(* When the patient peaked higher than current, compute_trajectory
+   cannot emit RapidDeterioration. *)
+Lemma peak_recovery_not_rapid : forall ts l,
+  latest ts = Some l ->
+  obs_stage l <? max_stage ts = true ->
+  compute_trajectory ts <> TemporalProgression.RapidDeterioration.
+Proof.
+  intros ts l Hl Hpeak. unfold compute_trajectory.
+  rewrite Hl.
+  destruct (earliest ts) as [e|]; [|discriminate].
+  destruct (negb (obs_time_hours e <=? obs_time_hours l)); [discriminate|].
+  rewrite Hpeak.
+  destruct ((Z.of_nat (obs_stage l) - Z.of_nat (obs_stage e) >? 0)%Z);
+  [discriminate|].
+  destruct ((Z.of_nat (obs_stage l) - Z.of_nat (obs_stage e) <? 0)%Z);
+  discriminate.
+Qed.
+
+(* Rapid-climb witness: true when some adjacent pair exceeds the rapid threshold. *)
+Fixpoint had_rapid_climb (ts : PatientTimeSeries) : bool :=
+  match ts with
+  | [] | [_] => false
+  | o1 :: ((o2 :: _) as rest) =>
+      let dh := obs_time_hours o1 - obs_time_hours o2 in
+      let ds := (Z.of_nat (obs_stage o1) - Z.of_nat (obs_stage o2))%Z in
+      ((obs_time_hours o2 <=? obs_time_hours o1) &&
+       (ds * 240 >? 20 * Z.of_nat dh)%Z)%bool
+      || had_rapid_climb rest
+  end.
+
+Lemma had_rapid_climb_singleton : forall o, had_rapid_climb [o] = false.
+Proof. reflexivity. Qed.
+
+Lemma had_rapid_climb_empty : had_rapid_climb [] = false.
+Proof. reflexivity. Qed.
+
+Lemma had_rapid_climb_cons : forall o1 o2 rest,
+  had_rapid_climb (o1 :: o2 :: rest) =
+  (((obs_time_hours o2 <=? obs_time_hours o1) &&
+    ((Z.of_nat (obs_stage o1) - Z.of_nat (obs_stage o2)) * 240
+     >? 20 * Z.of_nat (obs_time_hours o1 - obs_time_hours o2))%Z)%bool
+   || had_rapid_climb (o2 :: rest)).
+Proof. reflexivity. Qed.
+
+Lemma max_stage_ge_latest : forall ts o,
+  latest ts = Some o -> obs_stage o <= max_stage ts.
+Proof.
+  intros ts o H.
+  destruct ts as [|o' rest].
+  - discriminate.
+  - simpl in H. inversion H. subst. simpl.
+    destruct rest as [|o2 rest2].
+    + lia.
+    + apply Nat.le_max_l.
+Qed.
+
+Lemma reached_IIIB_implies_max_ge_6 : forall ts,
+  reached_stage_IIIB ts = true -> 6 <= max_stage ts.
+Proof.
+  intros ts H. unfold reached_stage_IIIB in H.
+  apply Nat.leb_le in H. exact H.
+Qed.
+
+(* Inconsistent timestamp: obs_time_hours differs from embedded state clock *)
+Definition inconsistent_obs : Observation :=
+  MkObservation 10
+    (ClinicalState.MkClinicalState
+      ClinicalState.default_risk_factors
+      (Some ClinicalState.default_labs)
+      (Some ClinicalState.default_coag)
+      ClinicalState.default_micro
+      (Some ClinicalState.default_vitals)
+      SystemicSigns.no_signs
+      IntestinalSigns.no_signs
+      RadiographicSigns.no_findings
+      NeonatalOrganFailure.NeuroNormal
+      5 5 5 5).
+
+Lemma inconsistent_obs_rejected :
+  add_observation inconsistent_obs [] = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Definition early_obs : Observation :=
+  make_observation 2 ClinicalState.empty.
+
+Definition late_obs : Observation :=
+  make_observation 8 ClinicalState.empty.
+
+Lemma backward_time_rejected :
+  add_observation early_obs [late_obs] = None.
+Proof. vm_compute. reflexivity. Qed.
+
+End TimeSeries.
+
+Module TrajectoryClassification.
+
+Definition classify_from_series (ts : TimeSeries.PatientTimeSeries) : option Stage.t :=
+  match TimeSeries.latest ts with
+  | Some obs => Some (Classification.classify (TimeSeries.obs_state obs))
+  | None => None
+  end.
+
+Definition classify_with_trajectory (ts : TimeSeries.PatientTimeSeries)
+    : option Classification.TrajectoryAwareClassification :=
+  match TimeSeries.latest ts with
+  | Some obs =>
+      let stage := Classification.classify (TimeSeries.obs_state obs) in
+      let traj := TimeSeries.compute_trajectory ts in
+      let urg := Classification.urgency_from_trajectory traj stage in
+      let esc := TimeSeries.count_escalations ts in
+      let hrs := match TimeSeries.first_at_stage ts (Stage.to_nat stage) with
+                 | Some first_obs =>
+                     TimeSeries.obs_time_hours obs - TimeSeries.obs_time_hours first_obs
+                 | None => 0
+                 end in
+      Some (Classification.MkTrajectoryAware stage traj urg esc hrs)
+  | None => None
+  end.
+
+Definition escalation_warranted (ts : TimeSeries.PatientTimeSeries) : bool :=
+  match classify_with_trajectory ts with
+  | Some tac =>
+      match Classification.tac_urgency tac with
+      | Classification.Emergent => true
+      | Classification.Urgent => true
+      | _ => false
+      end
+  | None => false
+  end.
+
+Definition recommended_reassess_hours (ts : TimeSeries.PatientTimeSeries) : nat :=
+  match classify_with_trajectory ts with
+  | Some tac =>
+      match Classification.tac_urgency tac with
+      | Classification.Emergent => 1
+      | Classification.Urgent => 2
+      | Classification.Elevated => 4
+      | Classification.Routine => 8
+      end
+  | None => 8
+  end.
+
+End TrajectoryClassification.
+
 Module Treatment.
 
 Inductive t : Type :=
@@ -358,6 +763,14 @@ Lemma suspected_nec_conservative : forall s,
   Stage.to_nat s <= 2 -> requires_surgery (of_stage s) = false.
 Proof.
   solve_stage.
+Qed.
+
+(* Stage IIA does not require surgery. *)
+Theorem classify_IIA_no_surgery : forall c,
+  Classification.classify c = Stage.IIA ->
+  requires_surgery (of_stage (Classification.classify c)) = false.
+Proof.
+  intros c H. rewrite H. reflexivity.
 Qed.
 
 End Treatment.
@@ -552,8 +965,10 @@ Definition duration_days (s : Stage.t) : nat :=
 
 (* Culture-directed therapy: adjust regimen based on microbiology results.
    Blood culture timing fields gate escalation: no positive result after
-   the escalation threshold hours triggers broadening consideration. *)
-Definition culture_escalation_threshold_h : nat := 48.
+   the escalation threshold hours triggers broadening consideration.
+   Lambert et al. 2012, J Pediatr Surg 47(11):2111-2118. *)
+Definition culture_escalation_threshold_h : nat :=
+  ClinicalParameters.param_value ClinicalParameters.culture_escalation_hours.
 
 (* Guarded subtraction — if collected_h > current_h (data error),
    treat as not-yet-pending rather than silently clamping to 0. *)
@@ -734,9 +1149,12 @@ Definition can_restart_feeds (stage_nat : nat) (days_npo : nat)
      to slower rates, supporting 20 mL/kg/day as standard.
    - Full feed target 150 mL/kg/day: Embleton et al. 2005, Arch Dis Child Fetal
      Neonatal Ed 90(3):F224-F228 *)
-Definition trophic_feed_volume_ml_kg_day : nat := 20.
-Definition advancement_rate_ml_kg_day : nat := 20.
-Definition full_feed_volume_ml_kg_day : nat := 150.
+Definition trophic_feed_volume_ml_kg_day : nat :=
+  ClinicalParameters.param_value ClinicalParameters.feed_trophic_ml_kg_day.
+Definition advancement_rate_ml_kg_day : nat :=
+  ClinicalParameters.param_value ClinicalParameters.feed_advancement_ml_kg_day.
+Definition full_feed_volume_ml_kg_day : nat :=
+  ClinicalParameters.param_value ClinicalParameters.feed_full_ml_kg_day.
 
 Definition preferred_feed_type_post_nec : FeedType := BreastMilk.
 
@@ -996,6 +1414,44 @@ Proof.
   intros [] []; vm_compute; intro H; try lia; discriminate.
 Qed.
 
+(* Endpoint monotonicity (low, mid, high) across all three risk families. *)
+
+Lemma mortality_low_monotone : forall s1 s2,
+  Stage.leb s1 s2 = true -> low (mortality_risk s1) <= low (mortality_risk s2).
+Proof. intros [] []; vm_compute; intro H; try lia; discriminate. Qed.
+
+Lemma mortality_mid_monotone : forall s1 s2,
+  Stage.leb s1 s2 = true -> mid (mortality_risk s1) <= mid (mortality_risk s2).
+Proof. intros [] []; vm_compute; intro H; try lia; discriminate. Qed.
+
+Lemma mortality_high_monotone : forall s1 s2,
+  Stage.leb s1 s2 = true -> high (mortality_risk s1) <= high (mortality_risk s2).
+Proof. intros [] []; vm_compute; intro H; try lia; discriminate. Qed.
+
+Lemma stricture_low_monotone : forall s1 s2,
+  Stage.leb s1 s2 = true -> low (stricture_risk s1) <= low (stricture_risk s2).
+Proof. intros [] []; vm_compute; intro H; try lia; discriminate. Qed.
+
+Lemma stricture_mid_monotone : forall s1 s2,
+  Stage.leb s1 s2 = true -> mid (stricture_risk s1) <= mid (stricture_risk s2).
+Proof. intros [] []; vm_compute; intro H; try lia; discriminate. Qed.
+
+Lemma stricture_high_monotone : forall s1 s2,
+  Stage.leb s1 s2 = true -> high (stricture_risk s1) <= high (stricture_risk s2).
+Proof. intros [] []; vm_compute; intro H; try lia; discriminate. Qed.
+
+Lemma short_bowel_low_monotone : forall s1 s2,
+  Stage.leb s1 s2 = true -> low (short_bowel_risk s1) <= low (short_bowel_risk s2).
+Proof. intros [] []; vm_compute; intro H; try lia; discriminate. Qed.
+
+Lemma short_bowel_mid_monotone : forall s1 s2,
+  Stage.leb s1 s2 = true -> mid (short_bowel_risk s1) <= mid (short_bowel_risk s2).
+Proof. intros [] []; vm_compute; intro H; try lia; discriminate. Qed.
+
+Lemma short_bowel_high_monotone : forall s1 s2,
+  Stage.leb s1 s2 = true -> high (short_bowel_risk s1) <= high (short_bowel_risk s2).
+Proof. intros [] []; vm_compute; intro H; try lia; discriminate. Qed.
+
 (* Parameterized risk functions.
    Institutions can substitute era-specific or local data
    without modifying definitions. *)
@@ -1051,6 +1507,15 @@ Lemma mods_forces_at_least_IIIA : forall s oa,
 Proof.
   intros s oa H. unfold stage_with_organ_failure.
   rewrite H. destruct s; simpl; lia.
+Qed.
+
+Lemma stage_with_organ_failure_idempotent : forall s oa,
+  stage_with_organ_failure (stage_with_organ_failure s oa) oa =
+  stage_with_organ_failure s oa.
+Proof.
+  intros s oa. unfold stage_with_organ_failure.
+  destruct (NeonatalOrganFailure.multiorgan_dysfunction oa);
+  destruct s; reflexivity.
 Qed.
 
 End OrganFailureFeedback.

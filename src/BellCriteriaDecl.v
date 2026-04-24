@@ -359,4 +359,103 @@ Proof. vm_compute. reflexivity. Qed.
 (* Despite intermediate disagreement, both agree on the surgical
    boundary (IIIB). See classify_agree_on_surgery above. *)
 
+(* Surjectivity witnesses for classify_declarative: one concrete state
+   per stage. *)
+
+Definition decl_risk : RiskFactors.t := divergence_risk.
+
+(* IA: no findings of any kind *)
+Definition decl_IA_state : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    decl_risk None None Microbiology.no_cultures None
+    SystemicSigns.no_signs IntestinalSigns.no_signs
+    RadiographicSigns.no_findings
+    NeonatalOrganFailure.NeuroNormal 0 0 0 0.
+
+Lemma decl_IA_stages : classify_declarative decl_IA_state = Stage.IA.
+Proof. vm_compute. reflexivity. Qed.
+
+(* IB: systemic stage1 + intestinal gross-blood *)
+Definition decl_IB_state : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    decl_risk None None Microbiology.no_cultures None
+    (SystemicSigns.MkSystemicSigns
+      true false false false false false false false false false)
+    (IntestinalSigns.MkIntestinalSigns
+      false false false true false false false false false false)
+    RadiographicSigns.no_findings
+    NeonatalOrganFailure.NeuroNormal 0 0 0 0.
+
+Lemma decl_IB_stages : classify_declarative decl_IB_state = Stage.IB.
+Proof. vm_compute. reflexivity. Qed.
+
+(* IIA: systemic >= 1, intestinal >= 2 (stage2), radiographic >= 2 (stage2a) *)
+Definition decl_IIA_state : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    decl_risk None None Microbiology.no_cultures None
+    (SystemicSigns.MkSystemicSigns
+      true false false false false false false false false false)
+    (IntestinalSigns.MkIntestinalSigns
+      false false false false true false false false false false)
+    (RadiographicSigns.MkRadiographicSigns
+      false true false false false false false)
+    NeonatalOrganFailure.NeuroNormal 0 0 0 0.
+
+Lemma decl_IIA_stages : classify_declarative decl_IIA_state = Stage.IIA.
+Proof. vm_compute. reflexivity. Qed.
+
+(* IIB: systemic >= 2 (metabolic acidosis) + intestinal >= 2 + rad >= 2 (stage2b) *)
+Definition decl_IIB_state : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    decl_risk None None Microbiology.no_cultures None
+    (SystemicSigns.MkSystemicSigns
+      false false false false true false false false false false)
+    (IntestinalSigns.MkIntestinalSigns
+      false false false false true false false false false false)
+    (RadiographicSigns.MkRadiographicSigns
+      false false false false true false false)
+    NeonatalOrganFailure.NeuroNormal 0 0 0 0.
+
+Lemma decl_IIB_stages : classify_declarative decl_IIB_state = Stage.IIB.
+Proof. vm_compute. reflexivity. Qed.
+
+(* IIIA: systemic >= 3 (hypotension) + intestinal >= 3 + rad >= 2 (stage2b) *)
+Definition decl_IIIA_state : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    decl_risk None None Microbiology.no_cultures None
+    (SystemicSigns.MkSystemicSigns
+      false false false false false false true false false false)
+    (IntestinalSigns.MkIntestinalSigns
+      false false false false false false false false true false)
+    (RadiographicSigns.MkRadiographicSigns
+      false false false false true false false)
+    NeonatalOrganFailure.NeuroNormal 0 0 0 0.
+
+Lemma decl_IIIA_stages : classify_declarative decl_IIIA_state = Stage.IIIA.
+Proof. vm_compute. reflexivity. Qed.
+
+(* IIIB: pneumoperitoneum *)
+Definition decl_IIIB_state : ClinicalState.t :=
+  ClinicalState.MkClinicalState
+    decl_risk None None Microbiology.no_cultures None
+    SystemicSigns.no_signs IntestinalSigns.no_signs
+    (RadiographicSigns.MkRadiographicSigns
+      false false false false false false true)
+    NeonatalOrganFailure.NeuroNormal 0 0 0 0.
+
+Lemma decl_IIIB_stages : classify_declarative decl_IIIB_state = Stage.IIIB.
+Proof. vm_compute. reflexivity. Qed.
+
+Theorem classify_declarative_surjective : forall s : Stage.t,
+  exists c : ClinicalState.t, classify_declarative c = s.
+Proof.
+  intros []; eexists;
+  [ exact decl_IA_stages
+  | exact decl_IB_stages
+  | exact decl_IIA_stages
+  | exact decl_IIB_stages
+  | exact decl_IIIA_stages
+  | exact decl_IIIB_stages ].
+Qed.
+
 End BellCriteria.

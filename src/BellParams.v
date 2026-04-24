@@ -63,6 +63,14 @@ Definition lucas_cole_1990 : nat := 6.
 Definition sharma_2006 : nat := 7.
 Definition mcelhinney_2000 : nat := 8.
 
+Definition attridge_2006 : nat := 11.
+Definition guillet_2006 : nat := 12.
+Definition roberts_2017 : nat := 13.
+Definition berseth_2003 : nat := 14.
+Definition hay_thureen_2010 : nat := 15.
+Definition embleton_2005 : nat := 16.
+Definition lambert_2012 : nat := 17.
+
 Definition weight_extremely_preterm := MkParam 4 neu_walker_2011 2011.
 Definition weight_very_preterm := MkParam 3 neu_walker_2011 2011.
 Definition weight_moderate_preterm := MkParam 2 neu_walker_2011 2011.
@@ -101,6 +109,38 @@ Definition creatinine_severe_x10 := MkParam 20 wynn_2017 2017.
 Definition urine_oliguria_x10 := MkParam 5 richardson_2001 2001.
 Definition urine_low_x10 := MkParam 10 richardson_2001 2001.
 Definition organ_failure_threshold := MkParam 2 wynn_2017 2017.
+
+(* Medication risk weights.
+   - Indomethacin: Attridge et al. 2006, J Perinatol 26(2):93-100
+   - H2 blockers: Guillet et al. 2006, Pediatrics 117(1):e137-e142
+   - Antenatal steroids (protective): Roberts et al. 2017, Cochrane *)
+Definition weight_indomethacin := MkParam 2 attridge_2006 2006.
+Definition weight_h2_blockers := MkParam 1 guillet_2006 2006.
+Definition weight_antenatal_steroids_protective := MkParam 1 roberts_2017 2017.
+
+(* Feeding protocol volumes (mL/kg/day).
+   - Trophic feeds: Berseth et al. 2003, J Pediatr 143(4):500-505
+   - Advancement rate: Hay & Thureen 2010, Clin Perinatol 37(2):259-275;
+     SIFT trial Dorling et al. 2019, NEJM 381(13):1241-1250
+   - Full feed target: Embleton et al. 2005, Arch Dis Child Fetal
+     Neonatal Ed 90(3):F224-F228
+   - Rapid feed advancement threshold: Berseth et al. 2003. *)
+Definition feed_trophic_ml_kg_day := MkParam 20 berseth_2003 2003.
+Definition feed_advancement_ml_kg_day := MkParam 20 hay_thureen_2010 2010.
+Definition feed_full_ml_kg_day := MkParam 150 embleton_2005 2005.
+Definition feed_rapid_advancement_threshold := MkParam 30 berseth_2003 2003.
+
+(* Culture escalation window.
+   Lambert et al. 2012, J Pediatr Surg 47(11):2111-2118 — 48h blood culture
+   negative window before empiric broadening consideration. *)
+Definition culture_escalation_hours := MkParam 48 lambert_2012 2012.
+
+(* Age-adjusted diagnosis demotion threshold.
+   Attridge et al. 2006, J Perinatol 26:93-100 + Neu & Walker 2011, NEJM 364:255-264.
+   Age-bracket likelihood scores below 2 indicate the diagnosis is
+   unlikely at that gestational/postnatal age; the base diagnosis is
+   demoted to FeedingIntolerance. *)
+Definition age_adjust_demotion_threshold := MkParam 2 neu_walker_2011 2011.
 
 End ClinicalParameters.
 
@@ -252,7 +292,8 @@ Definition in_peak_nec_window (ga_weeks day_of_life : nat) : bool :=
 (* Pre-NEC feeding advancement rate as risk factor.
    Berseth et al. 2003, J Pediatr 143(4):500-505.
    Rapid advancement (>30 mL/kg/day) associated with increased NEC. *)
-Definition rapid_feed_advancement_threshold : nat := 30.
+Definition rapid_feed_advancement_threshold : nat :=
+  ClinicalParameters.param_value ClinicalParameters.feed_rapid_advancement_threshold.
 
 (* Medication risk factors.
    - Indomethacin: Attridge et al. 2006, J Perinatol 26(2):93-100
@@ -264,12 +305,19 @@ Record MedicationRiskFactors : Type := MkMedRisk {
   received_antenatal_steroids : bool   (* protective *)
 }.
 
+Definition w_indomethacin : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_indomethacin.
+Definition w_h2_blockers : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_h2_blockers.
+Definition w_antenatal_steroids_protective : nat :=
+  ClinicalParameters.param_value ClinicalParameters.weight_antenatal_steroids_protective.
+
 Definition medication_risk_score (m : MedicationRiskFactors) : nat :=
-  (if received_indomethacin m then 2 else 0) +
-  (if received_h2_blockers m then 1 else 0).
+  (if received_indomethacin m then w_indomethacin else 0) +
+  (if received_h2_blockers m then w_h2_blockers else 0).
 
 Definition medication_protective_score (m : MedicationRiskFactors) : nat :=
-  if received_antenatal_steroids m then 1 else 0.
+  if received_antenatal_steroids m then w_antenatal_steroids_protective else 0.
 
 (* The Z score can go negative: a term breast-fed infant with no
    comorbidities has raw = 0, protective = 2, so Z score = -2. *)
