@@ -1,6 +1,7 @@
-From Stdlib Require Import Arith.
+From Stdlib Require Import PeanoNat.
 From Stdlib Require Import Bool.
 From Stdlib Require Import List.
+From Stdlib Require Import String.
 From Stdlib Require Import ZArith.
 From Stdlib Require Import Lia.
 
@@ -10,20 +11,21 @@ From BellStaging Require Import BellStage.
 From BellStaging Require Import BellClassification.
 
 Import ListNotations.
+Open Scope string_scope.
 
 Module Serialization.
 
-(* Tree-shaped value type used as the serialization target.
-   Records serialize positionally to JList with one child per field
-   in declaration order. FHIR resource mapping is supplied at the
-   outer layer (keys per resource type); here keys are implicit in
-   field order. *)
+(* Tree-shaped value type used as the serialization target. Supports both
+   positional JList encoding (for roundtrip proofs) and keyed JObject
+   encoding (for FHIR-compatible JSON emission). *)
 
 Inductive JValue : Type :=
   | JNull : JValue
   | JBool : bool -> JValue
   | JNat : nat -> JValue
-  | JList : list JValue -> JValue.
+  | JStr : string -> JValue
+  | JList : list JValue -> JValue
+  | JObject : list (string * JValue) -> JValue.
 
 (* --- Small enum and option helpers --- *)
 
@@ -368,5 +370,144 @@ Proof.
   intros c. unfold classify_serialized.
   rewrite cs_roundtrip. reflexivity.
 Qed.
+
+(* --- FHIR-keyed serialization ---
+   Emits each ClinicalState field as a named entry in a JObject.
+   Intended for JSON rendering downstream (OCaml / Python library
+   converts JObject to FHIR Bundle shape). The outer keys map to
+   FHIR resource types (Patient, Observation, Condition). *)
+
+Definition kv_nat (key : string) (n : nat) : string * JValue :=
+  (key, JNat n).
+
+Definition kv_bool (key : string) (b : bool) : string * JValue :=
+  (key, JBool b).
+
+Definition kv_str (key : string) (s : string) : string * JValue :=
+  (key, JStr s).
+
+Definition rf_fields (r : RiskFactors.t) : list (string * JValue) :=
+  [kv_nat "gestationalAgeWeeks" (RiskFactors.gestational_age_weeks r);
+   kv_nat "birthWeightGrams" (RiskFactors.birth_weight_grams r);
+   kv_bool "formulaFed" (RiskFactors.formula_fed r);
+   kv_bool "perinatalAsphyxia" (RiskFactors.history_of_perinatal_asphyxia r);
+   kv_bool "congenitalHeartDisease" (RiskFactors.congenital_heart_disease r);
+   kv_bool "polycythemia" (RiskFactors.polycythemia r);
+   kv_bool "umbilicalCatheter" (RiskFactors.umbilical_catheter r);
+   kv_bool "exchangeTransfusion" (RiskFactors.exchange_transfusion r)].
+
+Definition labs_fields (l : LabValues.t) : list (string * JValue) :=
+  [kv_nat "wbcKPerUL" (LabValues.wbc_k_per_uL l);
+   kv_nat "absoluteNeutrophilCount" (LabValues.absolute_neutrophil_count l);
+   kv_nat "plateletKPerUL" (LabValues.platelet_k_per_uL l);
+   kv_nat "crpMgL" (LabValues.crp_mg_L l);
+   kv_nat "procalcitoninNgMLx10" (LabValues.procalcitonin_ng_mL_x10 l);
+   kv_nat "lactateMmolLx10" (LabValues.lactate_mmol_L_x10 l);
+   kv_nat "phX100" (LabValues.ph_x100 l);
+   kv_nat "baseDeficit" (LabValues.base_deficit l);
+   kv_nat "pco2MmHg" (LabValues.pco2_mmHg l);
+   kv_nat "glucoseMgDL" (LabValues.glucose_mg_dL l)].
+
+Definition systemic_fields (s : SystemicSigns.t) : list (string * JValue) :=
+  [kv_bool "temperatureInstability" (SystemicSigns.temperature_instability s);
+   kv_bool "apnea" (SystemicSigns.apnea s);
+   kv_bool "bradycardia" (SystemicSigns.bradycardia s);
+   kv_bool "lethargy" (SystemicSigns.lethargy s);
+   kv_bool "metabolicAcidosis" (SystemicSigns.metabolic_acidosis s);
+   kv_bool "thrombocytopenia" (SystemicSigns.thrombocytopenia s);
+   kv_bool "hypotension" (SystemicSigns.hypotension s);
+   kv_bool "respiratoryFailure" (SystemicSigns.respiratory_failure s);
+   kv_bool "dic" (SystemicSigns.dic s);
+   kv_bool "neutropenia" (SystemicSigns.neutropenia s)].
+
+Definition intestinal_fields (i : IntestinalSigns.t) : list (string * JValue) :=
+  [kv_bool "elevatedGastricResiduals" (IntestinalSigns.elevated_gastric_residuals i);
+   kv_bool "mildAbdominalDistension" (IntestinalSigns.mild_abdominal_distension i);
+   kv_bool "occultBloodInStool" (IntestinalSigns.occult_blood_in_stool i);
+   kv_bool "grossBloodInStool" (IntestinalSigns.gross_blood_in_stool i);
+   kv_bool "absentBowelSounds" (IntestinalSigns.absent_bowel_sounds i);
+   kv_bool "abdominalTenderness" (IntestinalSigns.abdominal_tenderness i);
+   kv_bool "abdominalCellulitis" (IntestinalSigns.abdominal_cellulitis i);
+   kv_bool "rightLowerQuadrantMass" (IntestinalSigns.right_lower_quadrant_mass i);
+   kv_bool "markedDistension" (IntestinalSigns.marked_distension i);
+   kv_bool "peritonitis" (IntestinalSigns.peritonitis i)].
+
+Definition radiographic_fields (r : RadiographicSigns.t) : list (string * JValue) :=
+  [kv_bool "normalOrMildIleus" (RadiographicSigns.normal_or_mild_ileus r);
+   kv_bool "intestinalDilation" (RadiographicSigns.intestinal_dilation r);
+   kv_bool "focalIleus" (RadiographicSigns.focal_ileus r);
+   kv_bool "pneumatosisIntestinalis" (RadiographicSigns.pneumatosis_intestinalis r);
+   kv_bool "portalVenousGas" (RadiographicSigns.portal_venous_gas r);
+   kv_bool "ascites" (RadiographicSigns.ascites r);
+   kv_bool "pneumoperitoneum" (RadiographicSigns.pneumoperitoneum r)].
+
+Definition neuro_string (n : NeonatalOrganFailure.NeuroStatus) : string :=
+  match n with
+  | NeonatalOrganFailure.NeuroNormal => "NeuroNormal"
+  | NeonatalOrganFailure.SarnatI => "SarnatI"
+  | NeonatalOrganFailure.SarnatII => "SarnatII"
+  | NeonatalOrganFailure.SarnatIII => "SarnatIII"
+  end.
+
+Definition stage_string (s : Stage.t) : string :=
+  match s with
+  | Stage.IA => "IA"
+  | Stage.IB => "IB"
+  | Stage.IIA => "IIA"
+  | Stage.IIB => "IIB"
+  | Stage.IIIA => "IIIA"
+  | Stage.IIIB => "IIIB"
+  end.
+
+(* FHIR-shaped Bundle: groups keyed fields under resource-type names. *)
+Definition ser_cs_fhir (c : ClinicalState.t) : JValue :=
+  JObject
+    [("resourceType", JStr "Bundle");
+     ("type", JStr "collection");
+     ("patient", JObject
+        (("resourceType", JStr "Patient") :: rf_fields (ClinicalState.risk_factors c)));
+     ("observationLabs",
+        match ClinicalState.labs c with
+        | Some l => JObject (("resourceType", JStr "Observation") :: labs_fields l)
+        | None => JNull
+        end);
+     ("observationSystemic", JObject
+        (("resourceType", JStr "Observation") ::
+         systemic_fields (ClinicalState.systemic c)));
+     ("observationIntestinal", JObject
+        (("resourceType", JStr "Observation") ::
+         intestinal_fields (ClinicalState.intestinal c)));
+     ("observationRadiographic", JObject
+        (("resourceType", JStr "DiagnosticReport") ::
+         radiographic_fields (ClinicalState.radiographic c)));
+     ("neuroStatus", JStr (neuro_string (ClinicalState.neuro_status c)));
+     ("hoursSinceSymptomOnset", JNat (ClinicalState.hours_since_symptom_onset c))].
+
+Definition ser_stage_fhir (s : Stage.t) : JValue :=
+  JObject
+    [("resourceType", JStr "Condition");
+     ("code", JStr "NEC");
+     ("stage", JStr (stage_string s));
+     ("stageNumeric", JNat (Stage.to_nat s))].
+
+(* Classification via FHIR-shaped input yields a FHIR Condition. *)
+Definition classify_fhir (c : ClinicalState.t) : JValue :=
+  ser_stage_fhir (Classification.classify c).
+
+Lemma neuro_string_injective : forall n1 n2,
+  neuro_string n1 = neuro_string n2 -> n1 = n2.
+Proof. intros [] []; simpl; intros H; try reflexivity; discriminate. Qed.
+
+Lemma stage_string_injective : forall s1 s2,
+  stage_string s1 = stage_string s2 -> s1 = s2.
+Proof. intros [] []; simpl; intros H; try reflexivity; discriminate. Qed.
+
+Lemma ser_stage_fhir_agrees : forall s,
+  ser_stage_fhir s =
+  JObject [("resourceType", JStr "Condition");
+           ("code", JStr "NEC");
+           ("stage", JStr (stage_string s));
+           ("stageNumeric", JNat (Stage.to_nat s))].
+Proof. reflexivity. Qed.
 
 End Serialization.

@@ -8,5 +8,6 @@ src/BellWitnesses.v
 src/BellSerialization.v
 src/BellCalibration.v
 src/BellModeling.v
+src/BellAPI.v
 src/BellExtraction.v
 src/BellStagingQC.v

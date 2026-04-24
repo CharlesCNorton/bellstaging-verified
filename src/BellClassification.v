@@ -1,4 +1,4 @@
-From Stdlib Require Import Arith.
+From Stdlib Require Import PeanoNat.
 From Stdlib Require Import Bool.
 From Stdlib Require Import List.
 From Stdlib Require Import ZArith.
@@ -84,6 +84,119 @@ Definition diagnose (c : ClinicalState.t) : Diagnosis.t :=
 
 Definition classify (c : ClinicalState.t) : Stage.t :=
   classify_stage c.
+
+(* Aggregate systemic indicator: any of the eight systemic/lab/vital
+   findings that qualify as systemic involvement in strict Bell. *)
+Definition any_systemic_indicator (c : ClinicalState.t) : bool :=
+  SystemicSigns.stage1_signs (ClinicalState.systemic c) ||
+  SystemicSigns.stage2b_signs (ClinicalState.systemic c) ||
+  ClinicalState.lab_metabolic_acidosis c ||
+  ClinicalState.lab_thrombocytopenia c ||
+  SystemicSigns.stage3_signs (ClinicalState.systemic c) ||
+  ClinicalState.effective_hypotension c ||
+  ClinicalState.has_dic c ||
+  ClinicalState.lab_neutropenia c.
+
+(* Strict Bell 1978 / Walsh-Kliegman 1986 classifier: requires any
+   systemic indicator for IIA, dedicated systemic stage2b signs for IIB. *)
+Definition classify_stage_strict_bell (c : ClinicalState.t) : Stage.t :=
+  let sys := ClinicalState.systemic c in
+  let int := ClinicalState.intestinal c in
+  let rad := ClinicalState.radiographic c in
+  let effective_stage3_sys := SystemicSigns.stage3_signs sys
+    || ClinicalState.effective_hypotension c
+    || ClinicalState.has_dic c
+    || ClinicalState.lab_neutropenia c in
+  let effective_stage2b_sys := SystemicSigns.stage2b_signs sys
+    || ClinicalState.lab_metabolic_acidosis c
+    || ClinicalState.lab_thrombocytopenia c in
+  if RadiographicSigns.pneumoperitoneum rad then Stage.IIIB
+  else if effective_stage3_sys && IntestinalSigns.stage3_signs int
+          && (RadiographicSigns.stage2a_findings rad ||
+              RadiographicSigns.stage2b_findings rad)
+       then Stage.IIIA
+  else if effective_stage2b_sys
+          && (effective_stage2b_sys || IntestinalSigns.stage2b_signs int)
+          && IntestinalSigns.stage2_signs int
+          && RadiographicSigns.stage2b_findings rad
+       then Stage.IIB
+  else if any_systemic_indicator c
+          && RadiographicSigns.definite_nec_findings rad
+          && IntestinalSigns.stage2_signs int
+       then Stage.IIA
+  else if IntestinalSigns.stage1b_signs int && SystemicSigns.stage1_signs sys
+       then Stage.IB
+  else Stage.IA.
+
+Definition classify_strict_bell (c : ClinicalState.t) : Stage.t :=
+  classify_stage_strict_bell c.
+
+(* Both classifiers agree on the surgical boundary. *)
+Lemma strict_bell_IIIB_iff_pneumoperitoneum : forall c,
+  classify_strict_bell c = Stage.IIIB <->
+  RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = true.
+Proof.
+  intros c. split.
+  - intro H. unfold classify_strict_bell, classify_stage_strict_bell in H.
+    destruct (RadiographicSigns.pneumoperitoneum _) eqn:E; [reflexivity|].
+    destruct (_ && _ && _)%bool; try discriminate.
+    destruct (_ && _ && _ && _)%bool; try discriminate.
+    destruct (_ && _ && _)%bool; try discriminate.
+    destruct (_ && _)%bool; discriminate.
+  - intro H. unfold classify_strict_bell, classify_stage_strict_bell.
+    rewrite H. reflexivity.
+Qed.
+
+Theorem classify_strict_agrees_on_surgery : forall c,
+  classify c = Stage.IIIB <-> classify_strict_bell c = Stage.IIIB.
+Proof.
+  intros c. split.
+  - intro H. apply strict_bell_IIIB_iff_pneumoperitoneum.
+    unfold classify, classify_stage in H.
+    destruct (RadiographicSigns.pneumoperitoneum _) eqn:E; [reflexivity|].
+    destruct (_ && _ && _)%bool; try discriminate.
+    destruct (_ && _ && _)%bool; try discriminate.
+    destruct (_ && _)%bool; try discriminate.
+    destruct (_ && _)%bool; discriminate.
+  - intro H. apply strict_bell_IIIB_iff_pneumoperitoneum in H.
+    unfold classify, classify_stage. rewrite H. reflexivity.
+Qed.
+
+(* Under strict Bell, IIA requires at least one systemic indicator. *)
+Theorem strict_bell_IIA_requires_systemic : forall c,
+  classify_strict_bell c = Stage.IIA ->
+  any_systemic_indicator c = true.
+Proof.
+  intros c H.
+  destruct (any_systemic_indicator c) eqn:Hsys; [reflexivity|].
+  exfalso.
+  unfold classify_strict_bell, classify_stage_strict_bell in H.
+  rewrite Hsys in H. simpl in H.
+  destruct (RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c));
+    [discriminate|].
+  destruct (IntestinalSigns.stage3_signs (ClinicalState.intestinal c));
+    destruct (RadiographicSigns.stage2a_findings (ClinicalState.radiographic c));
+    destruct (RadiographicSigns.stage2b_findings (ClinicalState.radiographic c));
+    destruct (IntestinalSigns.stage2_signs (ClinicalState.intestinal c));
+    destruct (IntestinalSigns.stage2b_signs (ClinicalState.intestinal c));
+    destruct (IntestinalSigns.stage1b_signs (ClinicalState.intestinal c));
+    destruct (SystemicSigns.stage1_signs (ClinicalState.systemic c));
+    destruct (RadiographicSigns.definite_nec_findings (ClinicalState.radiographic c));
+    (* any_systemic_indicator c = false forces each systemic/lab flag false *)
+    unfold any_systemic_indicator in Hsys;
+    repeat (apply orb_false_iff in Hsys; destruct Hsys as [Hsys ?]);
+    repeat match goal with
+    | H : SystemicSigns.stage1_signs _ = false |- _ => rewrite H in *
+    | H : SystemicSigns.stage2b_signs _ = false |- _ => rewrite H in *
+    | H : SystemicSigns.stage3_signs _ = false |- _ => rewrite H in *
+    | H : ClinicalState.lab_metabolic_acidosis _ = false |- _ => rewrite H in *
+    | H : ClinicalState.lab_thrombocytopenia _ = false |- _ => rewrite H in *
+    | H : ClinicalState.effective_hypotension _ = false |- _ => rewrite H in *
+    | H : ClinicalState.has_dic _ = false |- _ => rewrite H in *
+    | H : ClinicalState.lab_neutropenia _ = false |- _ => rewrite H in *
+    end;
+    simpl in H; try discriminate.
+Qed.
 
 (* Returns None when the input fails ClinicalState.is_valid. *)
 Definition classify_validated (c : ClinicalState.t) : option Stage.t :=
