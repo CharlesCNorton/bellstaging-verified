@@ -224,6 +224,66 @@ Proof.
   apply Classification.mods_escalates_urgency. exact Hmods.
 Qed.
 
+(* Trajectory-aware production-result variant. Returns the rich enum
+   distinguishing Invalid / Stale / Missing-* failure modes alongside
+   the successful TrajectoryAwareClassification, matching the pattern
+   in classify_full / classify_strict_full / classify_with_oa_full. *)
+Inductive FullContextResult : Type :=
+  | FullContextOK : Classification.TrajectoryAwareClassification -> FullContextResult
+  | FullContextInvalid : FullContextResult
+  | FullContextStale : FullContextResult
+  | FullContextMissingLabs : FullContextResult
+  | FullContextMissingCoag : FullContextResult
+  | FullContextMissingVitals : FullContextResult
+  | FullContextMissingMultiple : FullContextResult.
+
+Definition classify_with_full_context_full
+    (c : ClinicalState.t)
+    (oa : NeonatalOrganFailure.OrganFailureAssessment)
+    (ts : TimeSeries.PatientTimeSeries)
+    : FullContextResult :=
+  if negb (ClinicalState.is_valid c) then FullContextInvalid
+  else if negb (ClinicalState.signs_current c) then FullContextStale
+  else match ClinicalState.data_completeness c with
+       | ClinicalState.Complete =>
+           let stage := OrganFailureFeedback.classify_with_oa c oa in
+           let traj := TimeSeries.compute_trajectory ts in
+           let urg_base := Classification.urgency_from_trajectory traj stage in
+           let urg := Classification.urgency_with_organ_failure urg_base oa in
+           let esc := TimeSeries.count_escalations ts in
+           let hrs := match TimeSeries.first_at_stage ts (Stage.to_nat stage) with
+                      | Some first_obs =>
+                          match TimeSeries.latest ts with
+                          | Some lt =>
+                              TimeSeries.obs_time_hours lt -
+                              TimeSeries.obs_time_hours first_obs
+                          | None => 0
+                          end
+                      | None => 0
+                      end in
+           FullContextOK (Classification.MkTrajectoryAware stage traj urg esc hrs)
+       | ClinicalState.MissingLabs => FullContextMissingLabs
+       | ClinicalState.MissingCoag => FullContextMissingCoag
+       | ClinicalState.MissingVitals => FullContextMissingVitals
+       | ClinicalState.MissingMultiple => FullContextMissingMultiple
+       end.
+
+Lemma classify_with_full_context_full_invalid : forall c oa ts,
+  ClinicalState.is_valid c = false ->
+  classify_with_full_context_full c oa ts = FullContextInvalid.
+Proof.
+  intros c oa ts H. unfold classify_with_full_context_full. rewrite H. reflexivity.
+Qed.
+
+Lemma classify_with_full_context_full_stale : forall c oa ts,
+  ClinicalState.is_valid c = true ->
+  ClinicalState.signs_current c = false ->
+  classify_with_full_context_full c oa ts = FullContextStale.
+Proof.
+  intros c oa ts Hv Hf. unfold classify_with_full_context_full.
+  rewrite Hv, Hf. reflexivity.
+Qed.
+
 (* Surface MixedDiagnosis through the production API. *)
 Definition classify_mixed (c : ClinicalState.t)
     (f : DifferentialDiagnosis.DifferentialFeatures)

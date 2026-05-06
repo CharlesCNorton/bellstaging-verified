@@ -1060,6 +1060,15 @@ Definition diagnose_mixed (f : DifferentialDiagnosis.DifferentialFeatures) : Mix
     MkMixedDiagnosis DifferentialDiagnosis.NEC HighConfidence
       (Some DifferentialDiagnosis.Volvulus) (Some HighConfidence)
       true false
+  else if volv_feat && sip_feat then
+    (* Volvulus pattern + SIP perforation in extreme prematurity. Both
+       require operative intervention; secondary diagnosis is the SIP
+       reading because volvulus typically presents with bilious emesis
+       which is the primary discriminator. *)
+    MkMixedDiagnosis DifferentialDiagnosis.Volvulus HighConfidence
+      (Some DifferentialDiagnosis.SpontaneousIntestinalPerforation)
+      (Some ModerateConfidence)
+      false true
   else if nec_feat && sip_feat then
     (* Mixed presentation *)
     if nec_score <? sip_score then

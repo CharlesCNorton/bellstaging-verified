@@ -47,6 +47,28 @@ Definition gen_risk_factors : G RiskFactors.t :=
   bindGen gen_bool (fun exch =>
   returnGen (RiskFactors.MkRiskFactors ga bw ff asph chd poly umb exch))))))))).
 
+(* Constraint-respecting generator that honors the tightened ClinicalState.valid
+   predicate: extreme prematurity (GA < 28) is not paired with macrosomic
+   birth weight (>= 4000g), and post-term gestation (GA >= 42) is not paired
+   with extremely low birth weight (< 1000g). Birth weight ranges are
+   GA-conditional. *)
+Definition gen_consistent_ga_bw : G (nat * nat) :=
+  bindGen (choose (22, 42)%nat) (fun ga =>
+    let bw_low := if (42 <=? ga)%nat then 1000%nat else 400%nat in
+    let bw_high := if (ga <? 28)%nat then 3999%nat else 4500%nat in
+    bindGen (choose (bw_low, bw_high)%nat) (fun bw => returnGen (ga, bw))).
+
+Definition gen_risk_factors_consistent : G RiskFactors.t :=
+  bindGen gen_consistent_ga_bw (fun gb =>
+    let ga := fst gb in let bw := snd gb in
+    bindGen gen_bool (fun ff =>
+    bindGen gen_bool (fun asph =>
+    bindGen gen_bool (fun chd =>
+    bindGen gen_bool (fun poly =>
+    bindGen gen_bool (fun umb =>
+    bindGen gen_bool (fun exch =>
+    returnGen (RiskFactors.MkRiskFactors ga bw ff asph chd poly umb exch))))))))%nat.
+
 Definition gen_labs : G LabValues.t :=
   bindGen (choose (1, 40)) (fun wbc =>
   bindGen (choose (500, 10000)) (fun anc =>

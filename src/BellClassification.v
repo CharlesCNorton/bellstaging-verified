@@ -893,6 +893,170 @@ Record PatientPath : Type := MkPatientPath {
 Definition pp_to_series (p : PatientPath) : PatientTimeSeries :=
   pp_observations p.
 
+(* Smart constructor for the trivial singleton-observation case. The
+   bounded-rate obligation collapses because the only valid (i, j)
+   pair is (0, 0), where both the stage delta and the time delta are
+   zero. *)
+Definition mk_singleton_path (o : Observation) : PatientPath.
+Proof.
+  refine (MkPatientPath [o] _).
+  intros i j o1 o2 H1 H2 Htime.
+  destruct i as [|i']; destruct j as [|j'].
+  - simpl in H1, H2. inversion H1. inversion H2. subst.
+    rewrite Nat.sub_diag, Z.sub_diag. simpl. split; lia.
+  - destruct j'; simpl in H2; discriminate.
+  - destruct i'; simpl in H1; discriminate.
+  - destruct i'; simpl in H1; discriminate.
+Defined.
+
+(* General smart constructor. Validates the adjacent-pair rate bound (each
+   adjacent pair has bounded stage delta vs time delta) and time descent
+   (each adjacent pair has older later in the list), then lifts to all
+   pairs via the AllPairsBounded inductive predicate which encodes the
+   triangle inequality structurally. *)
+
+Fixpoint validate_adjacent_rate (ts : PatientTimeSeries) : bool :=
+  match ts with
+  | [] => true
+  | [_] => true
+  | o1 :: ((o2 :: _) as rest) =>
+      let dt := obs_time_hours o1 - obs_time_hours o2 in
+      (obs_time_hours o2 <=? obs_time_hours o1) &&
+      ((Z.of_nat (obs_stage o2) - Z.of_nat (obs_stage o1) <=?
+        Z.of_nat (20 * dt))%Z) &&
+      ((Z.of_nat (obs_stage o1) - Z.of_nat (obs_stage o2) <=?
+        Z.of_nat (20 * dt))%Z) &&
+      validate_adjacent_rate rest
+  end.
+
+(* The head dominates an observation x: t(x) <= t(head), and the
+   stage delta between them is bounded by 20 times the time delta. *)
+Definition head_dominates (h x : Observation) : Prop :=
+  obs_time_hours x <= obs_time_hours h /\
+  (Z.of_nat (obs_stage h) - Z.of_nat (obs_stage x) <=
+   Z.of_nat (20 * (obs_time_hours h - obs_time_hours x)))%Z /\
+  (Z.of_nat (obs_stage x) - Z.of_nat (obs_stage h) <=
+   Z.of_nat (20 * (obs_time_hours h - obs_time_hours x)))%Z.
+
+Inductive AllPairsBounded : PatientTimeSeries -> Prop :=
+  | APB_nil : AllPairsBounded []
+  | APB_cons : forall h ts,
+      (forall x, In x ts -> head_dominates h x) ->
+      AllPairsBounded ts ->
+      AllPairsBounded (h :: ts).
+
+(* Triangle inequality lift: if h dominates h2 and h2 dominates x, then
+   h dominates x. *)
+Lemma head_dominates_trans : forall h h2 x,
+  head_dominates h h2 ->
+  head_dominates h2 x ->
+  head_dominates h x.
+Proof.
+  intros h h2 x [Hth2 [Hd1 Hd2]] [Htx [He1 He2]].
+  unfold head_dominates. split; [|split].
+  - lia.
+  - rewrite Nat2Z.inj_mul in Hd1, He1, Hd2, He2.
+    rewrite Nat2Z.inj_mul.
+    assert (Hsub_h_x : (Z.of_nat (obs_time_hours h - obs_time_hours x) =
+                       Z.of_nat (obs_time_hours h - obs_time_hours h2) +
+                       Z.of_nat (obs_time_hours h2 - obs_time_hours x))%Z).
+    { rewrite <- Nat2Z.inj_add. f_equal. lia. }
+    lia.
+  - rewrite Nat2Z.inj_mul in Hd1, He1, Hd2, He2.
+    rewrite Nat2Z.inj_mul.
+    assert (Hsub_h_x : (Z.of_nat (obs_time_hours h - obs_time_hours x) =
+                       Z.of_nat (obs_time_hours h - obs_time_hours h2) +
+                       Z.of_nat (obs_time_hours h2 - obs_time_hours x))%Z).
+    { rewrite <- Nat2Z.inj_add. f_equal. lia. }
+    lia.
+Qed.
+
+Lemma validate_implies_all_pairs_bounded : forall ts,
+  validate_adjacent_rate ts = true -> AllPairsBounded ts.
+Proof.
+  induction ts as [|o ts' IH]; intros Hv.
+  - constructor.
+  - destruct ts' as [|o2 rest].
+    + apply APB_cons; [intros x Hx; destruct Hx | constructor].
+    + (* Use change to expose the && structure without unfolding multiplication. *)
+      change (validate_adjacent_rate (o :: o2 :: rest)) with
+        ((obs_time_hours o2 <=? obs_time_hours o) &&
+         ((Z.of_nat (obs_stage o2) - Z.of_nat (obs_stage o) <=?
+           Z.of_nat (20 * (obs_time_hours o - obs_time_hours o2)))%Z) &&
+         ((Z.of_nat (obs_stage o) - Z.of_nat (obs_stage o2) <=?
+           Z.of_nat (20 * (obs_time_hours o - obs_time_hours o2)))%Z) &&
+         validate_adjacent_rate (o2 :: rest)) in Hv.
+      apply andb_true_iff in Hv. destruct Hv as [Hv Hrec].
+      apply andb_true_iff in Hv. destruct Hv as [Hv Hd_o2_o].
+      apply andb_true_iff in Hv. destruct Hv as [Htime_o2_o Hd_o_o2].
+      apply Nat.leb_le in Htime_o2_o.
+      apply Z.leb_le in Hd_o_o2, Hd_o2_o.
+      pose proof (IH Hrec) as Hapb_tail.
+      apply APB_cons; [|exact Hapb_tail].
+      intros x Hx.
+      assert (Hdom_o_o2 : head_dominates o o2).
+      { unfold head_dominates. split; [exact Htime_o2_o|]. split; assumption. }
+      destruct Hx as [Heq|Hin].
+      * subst x. exact Hdom_o_o2.
+      * (* x is in rest. From AllPairsBounded (o2 :: rest), o2 dominates x. *)
+        inversion Hapb_tail as [|h_t ts_t Hdom_o2 _]; subst.
+        apply head_dominates_trans with (h2 := o2);
+          [exact Hdom_o_o2 | apply Hdom_o2; exact Hin].
+Qed.
+
+(* Indexed bound from AllPairsBounded. *)
+Lemma all_pairs_bounded_to_indexed : forall ts,
+  AllPairsBounded ts ->
+  forall i j o1 o2,
+    nth_error ts i = Some o1 ->
+    nth_error ts j = Some o2 ->
+    obs_time_hours o1 <= obs_time_hours o2 ->
+    (Z.of_nat (obs_stage o2) - Z.of_nat (obs_stage o1) <=
+     Z.of_nat (20 * (obs_time_hours o2 - obs_time_hours o1)))%Z /\
+    (Z.of_nat (obs_stage o1) - Z.of_nat (obs_stage o2) <=
+     Z.of_nat (20 * (obs_time_hours o2 - obs_time_hours o1)))%Z.
+Proof.
+  intros ts Hapb. induction Hapb as [|h ts' Hdom Hapb_rest IH]; intros i j o1 o2 H1 H2 Htime.
+  - destruct i; simpl in H1; discriminate.
+  - destruct i as [|i']; destruct j as [|j']; simpl in H1, H2.
+    + (* i = j = 0: o1 = o2 = h *)
+      inversion H1. inversion H2. subst.
+      rewrite Nat.sub_diag, Z.sub_diag. simpl. split; lia.
+    + (* i = 0, j = S j': o1 = h, o2 = nth_error ts' j' *)
+      inversion H1. subst o1.
+      apply nth_error_In in H2.
+      pose proof (Hdom o2 H2) as [Htime_o2_h [Hbnd1 Hbnd2]].
+      (* Htime: t(h) <= t(o2). Htime_o2_h: t(o2) <= t(h). So equality. *)
+      assert (Heqt : obs_time_hours o2 = obs_time_hours h) by lia.
+      rewrite Heqt. rewrite Nat.sub_diag. simpl.
+      rewrite Heqt in Hbnd1, Hbnd2. rewrite Nat.sub_diag in Hbnd1, Hbnd2.
+      simpl in Hbnd1, Hbnd2. split; lia.
+    + (* i = S i', j = 0: o1 = nth_error ts' i', o2 = h *)
+      inversion H2. subst o2.
+      apply nth_error_In in H1.
+      pose proof (Hdom o1 H1) as [Htime_o1_h [Hbnd1 Hbnd2]].
+      rewrite Nat2Z.inj_mul in Hbnd1, Hbnd2.
+      assert (Hsub : obs_time_hours h - obs_time_hours o1 =
+                     obs_time_hours h - obs_time_hours o1) by reflexivity.
+      split.
+      * (* Z(stage(h)) - Z(stage(o1)) <= Z(20 * (t(h) - t(o1))) *)
+        rewrite Nat2Z.inj_mul. lia.
+      * rewrite Nat2Z.inj_mul. lia.
+    + (* i = S i', j = S j': both in ts' *)
+      apply IH with (i := i') (j := j'); assumption.
+Qed.
+
+(* The full smart constructor. *)
+Definition try_mk_patient_path (ts : PatientTimeSeries) : option PatientPath.
+Proof.
+  destruct (validate_adjacent_rate ts) eqn:Hv.
+  - refine (Some (MkPatientPath ts _)).
+    intros i j o1 o2 H1 H2 Htime.
+    apply (all_pairs_bounded_to_indexed ts
+             (validate_implies_all_pairs_bounded ts Hv) i j o1 o2 H1 H2 Htime).
+  - exact None.
+Defined.
+
 (* Discrete-classifier soundness on a bounded-rate PatientPath: when the
    latest observation exists, the classifier returns its stage. The
    continuous-interpretation soundness theorem (that this stage equals

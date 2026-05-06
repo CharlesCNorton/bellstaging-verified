@@ -479,6 +479,41 @@ Proof.
   | exact decl_IIIB_stages ].
 Qed.
 
+(* Validity proofs for the divergence and surjectivity witnesses.
+   All use divergence_risk (GA 40, BW 3500), which falls outside both
+   the extreme-prematurity-with-macrosomia and post-term-with-ELBW
+   exclusions of the tightened valid predicate. Labs and vitals are
+   None, satisfying the option-None branches vacuously. *)
+Lemma wit_decl_IIB_proc_IA_valid : ClinicalState.valid wit_decl_IIB_proc_IA.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma wit_decl_IIA_proc_IA_valid : ClinicalState.valid wit_decl_IIA_proc_IA.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma wit_proc_IIB_decl_IA_valid : ClinicalState.valid wit_proc_IIB_decl_IA.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma wit_proc_IIA_decl_IA_valid : ClinicalState.valid wit_proc_IIA_decl_IA.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma decl_IA_state_valid : ClinicalState.valid decl_IA_state.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma decl_IB_state_valid : ClinicalState.valid decl_IB_state.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma decl_IIA_state_valid : ClinicalState.valid decl_IIA_state.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma decl_IIB_state_valid : ClinicalState.valid decl_IIB_state.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma decl_IIIA_state_valid : ClinicalState.valid decl_IIIA_state.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma decl_IIIB_state_valid : ClinicalState.valid decl_IIIB_state.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
 (* Helper: extract the radiographic-level requirement from a declarative
    IIA verdict. The simpl tactic reduces (2 <=? n) into match-on-n form,
    so we destruct the level value to discharge the case analysis.
