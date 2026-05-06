@@ -3,6 +3,7 @@ From Stdlib Require Import Bool.
 From Stdlib Require Import List.
 From Stdlib Require Import String.
 From Stdlib Require Import ZArith.
+From Stdlib Require Import Lia.
 
 From BellStaging Require Import BellParams.
 From BellStaging Require Import BellSigns.
@@ -860,16 +861,40 @@ Proof. intros H. contradiction. Qed.
 Definition robustness_rate_per_mille (m : ThreatModel) : nat :=
   tm_admits_per_mille m.
 
-(* Structural robustness: tightening the validity predicate cannot
-   increase the admit count for a fixed population. The proof is a
-   monotonicity argument: if every input that passes a stricter
-   predicate also passes a looser one, then the count of inputs
-   passing the stricter predicate is at most the count passing the
-   looser one. *)
-Lemma stricter_validity_reduces_admits : forall (loose strict : ThreatModel),
-  tm_population_size loose = tm_population_size strict ->
-  tm_invalid_but_passes strict <= tm_invalid_but_passes loose ->
-  tm_invalid_but_passes strict <= tm_invalid_but_passes loose.
-Proof. intros loose strict _ H. exact H. Qed.
+(* Concrete list-based robustness: when one predicate is stricter than
+   another (every input that passes the strict predicate also passes
+   the loose one), the count of inputs passing the strict predicate is
+   at most the count passing the loose predicate. This is the
+   structural fact under the population-level admit bound. *)
+Lemma filter_subset_length : forall {A : Type}
+    (strict_pred loose_pred : A -> bool) (xs : list A),
+  (forall x, strict_pred x = true -> loose_pred x = true) ->
+  List.length (filter strict_pred xs) <= List.length (filter loose_pred xs).
+Proof.
+  intros A strict_pred loose_pred xs Hsub.
+  induction xs as [|x xs' IH].
+  - simpl. lia.
+  - simpl.
+    destruct (strict_pred x) eqn:Es.
+    + apply Hsub in Es. rewrite Es. simpl. lia.
+    + destruct (loose_pred x); simpl; lia.
+Qed.
+
+(* Application to ThreatModel: when modeling the adversarial admits as
+   counts of inputs passing a validity predicate, tightening the
+   predicate (e.g., adding clinically_consistent_ga_bw and the
+   viability lower bounds to ClinicalState.is_valid) can only decrease
+   the admit count over a fixed population. *)
+Definition admits_count_at_predicate {A : Type} (pred : A -> bool)
+    (population : list A) : nat :=
+  List.length (filter pred population).
+
+Lemma admits_count_monotone_in_predicate : forall {A : Type}
+    (strict loose : A -> bool) (xs : list A),
+  (forall x, strict x = true -> loose x = true) ->
+  admits_count_at_predicate strict xs <= admits_count_at_predicate loose xs.
+Proof.
+  intros. unfold admits_count_at_predicate. apply filter_subset_length. assumption.
+Qed.
 
 End AdversarialModel.

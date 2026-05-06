@@ -52,6 +52,34 @@ Proof. intros []; unfold stage_count; simpl; lia. Qed.
 
 End Stage.
 
+(* Abstract Stage lattice signature. The Bell staging system fixes six
+   stages (IA, IB, IIA, IIB, IIIA, IIIB), but institutional sub-staging,
+   future Bell revisions, or a Modified Bell variant might require a
+   different finite stage set. The signature below abstracts what
+   downstream modules need from a stage lattice: a finite type with a
+   nat-valued ordering that witnesses bounded membership. The canonical
+   BellStageLattice implementation satisfies the signature; alternative
+   implementations can be plugged in via the same interface. *)
+Module Type STAGE_LATTICE.
+  Parameter t : Type.
+  Parameter to_nat : t -> nat.
+  Parameter stage_count : nat.
+  Parameter le : t -> t -> Prop.
+  Parameter leb : t -> t -> bool.
+  Axiom to_nat_lower_bound : forall s, 1 <= to_nat s.
+  Axiom to_nat_upper_bound : forall s, to_nat s <= stage_count.
+End STAGE_LATTICE.
+
+Module BellStageLattice <: STAGE_LATTICE.
+  Definition t := Stage.t.
+  Definition to_nat := Stage.to_nat.
+  Definition stage_count := Stage.stage_count.
+  Definition le := Stage.le.
+  Definition leb := Stage.leb.
+  Definition to_nat_lower_bound := Stage.to_nat_lower_bound.
+  Definition to_nat_upper_bound := Stage.to_nat_upper_bound.
+End BellStageLattice.
+
 (* Tactic for goals reducible by Stage.t case analysis. Handles:
    - universally quantified Stage.t variables
    - boolean equality/ordering goals

@@ -823,6 +823,34 @@ Proof.
   intros hours. unfold TemporalProgression.infer_trajectory. reflexivity.
 Qed.
 
+(* Direction encoding: the trichotomy distinction (improving / stable /
+   worsening) collapses RapidDeterioration into Worsening, since both
+   procedures agree at the trichotomy level even when they disagree on
+   whether a worsening trajectory crosses the rapid threshold. *)
+Definition direction_z (t : TemporalProgression.ClinicalTrajectory) : Z :=
+  match t with
+  | TemporalProgression.Improving => (-1)%Z
+  | TemporalProgression.Stable => 0%Z
+  | TemporalProgression.Worsening => 1%Z
+  | TemporalProgression.RapidDeterioration => 1%Z
+  end.
+
+Lemma infer_trajectory_direction : forall delta hours,
+  direction_z (TemporalProgression.infer_trajectory delta hours) = Z.sgn delta.
+Proof.
+  intros delta hours.
+  destruct delta as [|p|p].
+  - unfold TemporalProgression.infer_trajectory, direction_z. simpl. reflexivity.
+  - unfold TemporalProgression.infer_trajectory.
+    change ((Z.pos p >? 0)%Z) with true.
+    destruct (hours <? 6); unfold direction_z; reflexivity.
+  - unfold TemporalProgression.infer_trajectory.
+    change ((Z.neg p >? 0)%Z) with false.
+    change ((Z.neg p <? 0)%Z) with true.
+    unfold direction_z. reflexivity.
+Qed.
+
+
 
 Lemma max_stage_ge_latest : forall ts o,
   latest ts = Some o -> obs_stage o <= max_stage ts.

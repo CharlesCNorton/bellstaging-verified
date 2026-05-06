@@ -544,4 +544,55 @@ Lemma ser_stage_fhir_compliant : forall s,
   fhir_object_compliant (ser_stage_fhir s) = true.
 Proof. intros s. unfold ser_stage_fhir, fhir_object_compliant. reflexivity. Qed.
 
+(* Per-resource subfield conformance: each FHIR R4 resource type carries
+   a small set of required subfields. The check below covers the subset
+   that ser_cs_fhir / ser_stage_fhir actually emits.
+
+   - Condition: code, stage, stageNumeric (status omitted; we use
+     stageNumeric as an integer indicator following the FHIR-R4 Condition
+     resource pattern).
+   - Bundle: type, plus the five entry slots emitted by ser_cs_fhir.
+   - Patient/Observation/DiagnosticReport: each carries a resourceType
+     plus the canonical fields emitted by the *_fields functions. *)
+
+Definition has_field (key : string) (entries : list (string * JValue)) : bool :=
+  existsb (fun e => String.eqb (fst e) key) entries.
+
+Definition condition_fields_present (entries : list (string * JValue)) : bool :=
+  has_field "resourceType" entries &&
+  has_field "code" entries &&
+  has_field "stage" entries &&
+  has_field "stageNumeric" entries.
+
+Definition fhir_condition_compliant (j : JValue) : bool :=
+  match j with
+  | JObject entries => condition_fields_present entries
+  | _ => false
+  end.
+
+Lemma ser_stage_fhir_condition_compliant : forall s,
+  fhir_condition_compliant (ser_stage_fhir s) = true.
+Proof. intros s. unfold ser_stage_fhir, fhir_condition_compliant,
+  condition_fields_present, has_field. simpl. reflexivity. Qed.
+
+Definition bundle_fields_present (entries : list (string * JValue)) : bool :=
+  has_field "resourceType" entries &&
+  has_field "type" entries &&
+  has_field "patient" entries &&
+  has_field "observationLabs" entries &&
+  has_field "observationSystemic" entries &&
+  has_field "observationIntestinal" entries &&
+  has_field "observationRadiographic" entries.
+
+Definition fhir_bundle_compliant (j : JValue) : bool :=
+  match j with
+  | JObject entries => bundle_fields_present entries
+  | _ => false
+  end.
+
+Lemma ser_cs_fhir_bundle_compliant : forall c,
+  fhir_bundle_compliant (ser_cs_fhir c) = true.
+Proof. intros c. unfold ser_cs_fhir, fhir_bundle_compliant,
+  bundle_fields_present, has_field. simpl. reflexivity. Qed.
+
 End Serialization.
