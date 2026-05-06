@@ -207,11 +207,19 @@ Definition nec_confidence (f : DifferentialFeatures) : nat :=
    - Absence of NEC-specific radiographic signs: supportive
    - Extreme prematurity: SIP peaks at 23-27 weeks GA
      (Attridge et al. 2006, J Perinatol 26:93-100) — weight 2 *)
+(* Gated SIP confidence: returns 0 unless at least one positive
+   SIP-suggestive signal is present (pneumoperitoneum or extreme
+   prematurity). Without the gate, sip_confidence on a feature-free
+   patient returned 3 just from absence of NEC markers (no pneumatosis,
+   no PVG), which made FeedingIntolerance unreachable from any clean
+   clinical input — see findings_exclude_feeding_intolerance. *)
 Definition sip_confidence (f : DifferentialFeatures) : nat :=
-  (if has_pneumoperitoneum f then 3 else 0) +
-  (if negb (has_pneumatosis f) then 2 else 0) +
-  (if negb (has_portal_venous_gas f) then 1 else 0) +
-  (if extremely_preterm f then 2 else 0).
+  if has_pneumoperitoneum f || extremely_preterm f then
+    (if has_pneumoperitoneum f then 3 else 0) +
+    (if negb (has_pneumatosis f) then 2 else 0) +
+    (if negb (has_portal_venous_gas f) then 1 else 0) +
+    (if extremely_preterm f then 2 else 0)
+  else 0.
 
 (* Priority cascade in most_likely_diagnosis:
    1. Pneumatosis (pathognomonic for NEC, specificity ~98%) -> NEC
@@ -222,6 +230,12 @@ Definition sip_confidence (f : DifferentialFeatures) : nat :=
    6. Feeding intolerance history tie-breaker -> NEC
    7. SIP clinical pattern -> SIP
    8. Default fallback -> FeedingIntolerance *)
+(* FeedingIntolerance is reserved for the truly-no-findings case.
+   Tied confidences with at least one positive finding default to NEC,
+   the safer working diagnosis when evidence is mixed.
+   Previously, a tied non-zero score (e.g., PVG=true + extremely_preterm=true
+   producing nec=sip=4) would fall through to FeedingIntolerance — clinically
+   indefensible because PVG is a NEC-specific radiographic finding. *)
 Definition most_likely_diagnosis (f : DifferentialFeatures) : GIDifferential :=
   if has_pneumatosis f then NEC
   else if suggests_volvulus f then Volvulus
@@ -230,7 +244,8 @@ Definition most_likely_diagnosis (f : DifferentialFeatures) : GIDifferential :=
   else if nec_confidence f <? sip_confidence f then SpontaneousIntestinalPerforation
   else if has_preceding_feeding_intolerance f then NEC
   else if suggests_sip f then SpontaneousIntestinalPerforation
-  else FeedingIntolerance.
+  else if (nec_confidence f =? 0) && (sip_confidence f =? 0) then FeedingIntolerance
+  else NEC.
 
 (* Age-dependent differential likelihood.
    Volvulus: peak in first month of life.
@@ -265,12 +280,16 @@ Definition age_adjusted_sip_likelihood (ga_weeks : nat) : nat :=
    A formal calibration methodology (e.g., logistic regression coefficients)
    would provide evidence-based weights but requires access to patient-level data. *)
 
-(* Calibration invariant: pneumatosis alone gives NEC confidence > SIP confidence *)
+(* Calibration invariant: pneumatosis alone gives NEC confidence > SIP confidence.
+   Holds under both the gated (perf||ep required) and ungated SIP formula
+   because a pneumatosis_intestinalis = true pushes nec to >= 5 while sip
+   is bounded above by 6 only when pneumoperitoneum=true (and that case has
+   nec >= 8 from the perf-and-pneumatosis bonus). *)
 Lemma pneumatosis_nec_over_sip : forall f,
   has_pneumatosis f = true ->
   sip_confidence f < nec_confidence f.
 Proof.
-  intros f Hp. unfold nec_confidence, sip_confidence. rewrite Hp. simpl.
+  intros f Hp. unfold nec_confidence, sip_confidence. rewrite Hp.
   destruct (has_portal_venous_gas f); destruct (has_preceding_feeding_intolerance f);
   destruct (has_pneumoperitoneum f); destruct (extremely_preterm f);
   simpl; lia.
@@ -379,6 +398,10 @@ Proof.
   rewrite Hp, Hv, Hs, Heq, Nat.ltb_irrefl, Hfi, Hsip. reflexivity.
 Qed.
 
+(* FeedingIntolerance fallback now requires that *both* confidences are
+   zero — i.e. no NEC- or SIP-suggestive findings at all. The earlier
+   formulation fired on any tied non-zero score and produced clinically
+   indefensible verdicts (PVG → FeedingIntolerance). *)
 Lemma cascade_feeding_intolerance_fallback : forall f,
   has_pneumatosis f = false ->
   suggests_volvulus f = false ->
@@ -386,10 +409,52 @@ Lemma cascade_feeding_intolerance_fallback : forall f,
   sip_confidence f = nec_confidence f ->
   has_preceding_feeding_intolerance f = false ->
   suggests_sip f = false ->
+  nec_confidence f = 0 ->
   most_likely_diagnosis f = FeedingIntolerance.
 Proof.
-  intros f Hp Hv Hs Heq Hfi Hsip. unfold most_likely_diagnosis.
-  rewrite Hp, Hv, Hs, Heq, Nat.ltb_irrefl, Hfi, Hsip. reflexivity.
+  intros f Hp Hv Hs Heq Hfi Hsip Hzero. unfold most_likely_diagnosis.
+  rewrite Hp, Hv, Hs.
+  rewrite Heq, Nat.ltb_irrefl. rewrite Hfi, Hsip.
+  rewrite Hzero. simpl. reflexivity.
+Qed.
+
+(* Tied non-zero confidences default to NEC, the safer working diagnosis. *)
+Lemma cascade_tied_with_findings_is_nec : forall f,
+  has_pneumatosis f = false ->
+  suggests_volvulus f = false ->
+  suggests_sepsis_without_nec f = false ->
+  sip_confidence f = nec_confidence f ->
+  has_preceding_feeding_intolerance f = false ->
+  suggests_sip f = false ->
+  0 < nec_confidence f ->
+  most_likely_diagnosis f = NEC.
+Proof.
+  intros f Hp Hv Hs Heq Hfi Hsip Hpos. unfold most_likely_diagnosis.
+  rewrite Hp, Hv, Hs.
+  rewrite Heq, Nat.ltb_irrefl. rewrite Hfi, Hsip.
+  destruct (nec_confidence f =? 0) eqn:Ez.
+  - apply Nat.eqb_eq in Ez. lia.
+  - reflexivity.
+Qed.
+
+(* No clinically suggestive finding ever yields FeedingIntolerance.
+   Closes the "PVG → FeedingIntolerance" smell. *)
+Lemma findings_exclude_feeding_intolerance : forall f,
+  0 < nec_confidence f \/ 0 < sip_confidence f ->
+  most_likely_diagnosis f <> FeedingIntolerance.
+Proof.
+  intros f H Habs. unfold most_likely_diagnosis in Habs.
+  destruct (has_pneumatosis f); [discriminate|].
+  destruct (suggests_volvulus f); [discriminate|].
+  destruct (suggests_sepsis_without_nec f); [discriminate|].
+  destruct (sip_confidence f <? nec_confidence f); [discriminate|].
+  destruct (nec_confidence f <? sip_confidence f); [discriminate|].
+  destruct (has_preceding_feeding_intolerance f); [discriminate|].
+  destruct (suggests_sip f); [discriminate|].
+  destruct ((nec_confidence f =? 0) && (sip_confidence f =? 0)) eqn:Ez.
+  - apply andb_true_iff in Ez. destruct Ez as [Hn Hs].
+    apply Nat.eqb_eq in Hn, Hs. destruct H; lia.
+  - discriminate.
 Qed.
 
 (* Age-adjusted demotion threshold routed through ClinicalParameters. *)

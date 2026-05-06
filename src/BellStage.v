@@ -9,6 +9,13 @@ From BellStaging Require Import BellSigns.
 
 Import ListNotations.
 
+(* Validity bounds use literal naturals up to 9999 (gestational-age max,
+   birth-weight max, lab thresholds). Coq's stdlib emits an
+   abstract-large-number advisory because these compile to
+   Init.Nat.of_num_uint applications rather than unary S towers.
+   That's an intentional optimization, not a soundness concern. *)
+Set Warnings "-abstract-large-number".
+
 Module Stage.
 
 Inductive t : Type :=

@@ -1002,15 +1002,16 @@ Proof.
   - exists volvulus_presentation. exact volvulus_diagnosed.
   - exists sepsis_no_nec_presentation. exact sepsis_no_nec_diagnosed.
   - exists sip_presentation. exact sip_diagnosed.
-  - (* FeedingIntolerance requires nec = sip confidence and no
-       feeding intolerance and suggests_sip = false. PVG = true
-       inflates nec_confidence enough to match sip_confidence
-       when pneumoperitoneum = false and extremely_preterm = false. *)
-    (* PVG=T + extremely_preterm=T equalizes nec=sip=4,
-       no pneumoperitoneum kills suggests_sip, no feeding_intol
-       skips NEC tiebreaker, falls through to FeedingIntolerance. *)
+  - (* FeedingIntolerance is reserved for the truly-no-findings case.
+       With all features false, nec_confidence=0 and sip_confidence=0
+       (the gated SIP formula returns 0 without pneumoperitoneum or
+       extreme prematurity). Tied at zero, no tiebreak triggers, and
+       the both-zero clause selects FeedingIntolerance.
+       The earlier PVG+extremely_preterm witness is no longer reachable:
+       findings_exclude_feeding_intolerance proves any non-zero confidence
+       excludes FeedingIntolerance. *)
     exists (DifferentialDiagnosis.MkDifferentialFeatures
-      false true false false false false false false true).
+      false false false false false false false false false).
     vm_compute. reflexivity.
 Qed.
 

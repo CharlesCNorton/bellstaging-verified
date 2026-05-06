@@ -102,11 +102,21 @@ Definition compute_intestinal_level (i : IntestinalSigns.t) : nat :=
   else if IntestinalSigns.stage1a_signs i then 1
   else 0.
 
+(* Radiographic level encoding refined to distinguish specificity:
+   Level 3 (pneumoperitoneum) — absolute surgical indication.
+   Level 2 (PVG, ascites, pneumatosis) — Bell-pathognomonic NEC findings.
+   Level 1 (intestinal dilation, focal ileus, mild ileus) — nonspecific.
+   Level 0 — no findings.
+   The earlier encoding collapsed stage2a_findings (intestinal dilation
+   alone) into level 2, which let the declarative classifier reach IIA
+   on a finding that the procedural classifier (Bell-faithful) rejects.
+   This change closes the wit_decl_IIA_proc_IA divergence (now IB vs IA,
+   gap 1) without changing IIIB safety — pneumoperitoneum still maps to 3. *)
 Definition compute_radiographic_level (r : RadiographicSigns.t) : nat :=
   if RadiographicSigns.pneumoperitoneum r then 3
   else if RadiographicSigns.stage2b_findings r then 2
   else if RadiographicSigns.definite_nec_findings r then 2
-  else if RadiographicSigns.stage2a_findings r then 2
+  else if RadiographicSigns.stage2a_findings r then 1
   else if RadiographicSigns.stage1_findings r then 1
   else 0.
 
@@ -142,14 +152,16 @@ Definition classify_declarative (c : ClinicalState.t) : Stage.t :=
    - Both bounded to [1,6]
    - Both deterministic and total
 
-   Known divergences:
-   - IIB: classify_stage requires intestinal_stage2_signs as separate
+   Known divergences (after the radiographic-level refinement):
+   - IIB: classify_stage requires intestinal_stage2_signs as a separate
      conjunct; classify_declarative accepts intestinal_level >= 2 which
-     includes stage2b_signs alone without stage2_signs
-   - IIA: classify_stage requires definite_nec_findings (pneumatosis);
-     classify_declarative requires systemic >= 1 + intestinal >= 2 +
-     radiographic >= 2, which can fire on stage2a_findings without
-     pneumatosis *)
+     includes stage2b_signs alone without stage2_signs.
+   - IIA from PVG-only: PVG triggers radiographic_level >= 2, allowing
+     declarative IIA when systemic and intestinal levels are met without
+     pneumatosis (which the procedural classifier requires).
+   The narrower divergence "IIA from intestinal_dilation alone" is now
+   closed by compute_radiographic_level — stage2a_findings without
+   pneumatosis maps to level 1, not 2. *)
 
 Lemma classify_declarative_IIIB_on_perf : forall c,
   RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = true ->
@@ -254,12 +266,18 @@ Proof. vm_compute. reflexivity. Qed.
 Lemma wit1_procedural : Classification.classify wit_decl_IIB_proc_IA = Stage.IA.
 Proof. vm_compute. reflexivity. Qed.
 
-(* --- Witness 2: declarative = IIA, procedural = IA --- *)
+(* --- Witness 2: declarative = IB, procedural = IA --- *)
 (* Systemic: temperature_instability -> systemic_level = 1.
    Intestinal: absent_bowel_sounds -> stage2_signs = true, int_level = 2.
-   Radiographic: intestinal_dilation (stage2a, not pneumatosis) -> rad_level = 2.
-   classify_declarative: sys >= 1, int >= 2, rad >= 2 -> IIA.
-   classify_stage: IIA needs definite_nec_findings = pneumatosis = false -> IA. *)
+   Radiographic: intestinal_dilation only (stage2a, not pneumatosis).
+   Under the refined compute_radiographic_level, stage2a_findings
+   without pneumatosis maps to rad_level = 1, not 2.
+   classify_declarative: sys >= 1, int >= 1 met for IB; IIA fails on rad < 2
+     -> IB.
+   classify_stage: IIA needs definite_nec_findings = pneumatosis = false;
+     IB needs gross_blood_in_stool = false -> falls through to IA.
+   The earlier "declarative=IIA, procedural=IA" divergence (gap 2) is
+   reduced to "declarative=IB, procedural=IA" (gap 1) by the refinement. *)
 Definition wit_decl_IIA_proc_IA : ClinicalState.t :=
   ClinicalState.MkClinicalState
     divergence_risk None None Microbiology.no_cultures None
@@ -271,7 +289,7 @@ Definition wit_decl_IIA_proc_IA : ClinicalState.t :=
       false true false false false false false)
     NeonatalOrganFailure.NeuroNormal 0 0 0 0.
 
-Lemma wit2_declarative : classify_declarative wit_decl_IIA_proc_IA = Stage.IIA.
+Lemma wit2_declarative : classify_declarative wit_decl_IIA_proc_IA = Stage.IB.
 Proof. vm_compute. reflexivity. Qed.
 
 Lemma wit2_procedural : Classification.classify wit_decl_IIA_proc_IA = Stage.IA.
@@ -389,7 +407,10 @@ Definition decl_IB_state : ClinicalState.t :=
 Lemma decl_IB_stages : classify_declarative decl_IB_state = Stage.IB.
 Proof. vm_compute. reflexivity. Qed.
 
-(* IIA: systemic >= 1, intestinal >= 2 (stage2), radiographic >= 2 (stage2a) *)
+(* IIA: systemic >= 1, intestinal >= 2 (stage2), radiographic >= 2.
+   Uses pneumatosis_intestinalis to reach rad_level = 2 under the
+   refined compute_radiographic_level (stage2a_findings alone is now
+   level 1). *)
 Definition decl_IIA_state : ClinicalState.t :=
   ClinicalState.MkClinicalState
     decl_risk None None Microbiology.no_cultures None
@@ -398,7 +419,7 @@ Definition decl_IIA_state : ClinicalState.t :=
     (IntestinalSigns.MkIntestinalSigns
       false false false false true false false false false false)
     (RadiographicSigns.MkRadiographicSigns
-      false true false false false false false)
+      false false false true false false false)
     NeonatalOrganFailure.NeuroNormal 0 0 0 0.
 
 Lemma decl_IIA_stages : classify_declarative decl_IIA_state = Stage.IIA.
@@ -456,6 +477,142 @@ Proof.
   | exact decl_IIB_stages
   | exact decl_IIIA_stages
   | exact decl_IIIB_stages ].
+Qed.
+
+(* Helper: extract the radiographic-level requirement from a declarative
+   IIA verdict. The simpl tactic reduces (2 <=? n) into match-on-n form,
+   so we destruct the level value to discharge the case analysis.
+   The IIA-criterion fact is established via assert/case-analysis to
+   avoid `destruct ... eqn:` which trips a primitive-equality error
+   on the boolean returned by meets_criteria under Rocq 9. *)
+Lemma classify_declarative_IIA_requires_rad_level_2 : forall c,
+  classify_declarative c = Stage.IIA ->
+  2 <= compute_radiographic_level (ClinicalState.radiographic c).
+Proof.
+  intros c H.
+  assert (E_IIA : meets_criteria c stage_IIA_criteria = true).
+  { unfold classify_declarative in H.
+    destruct (meets_criteria c stage_IIIB_criteria); [discriminate|].
+    destruct (meets_criteria c stage_IIIA_criteria); [discriminate|].
+    destruct (meets_criteria c stage_IIB_criteria); [discriminate|].
+    destruct (meets_criteria c stage_IIA_criteria); [reflexivity|].
+    destruct (meets_criteria c stage_IB_criteria); discriminate. }
+  unfold meets_criteria, stage_IIA_criteria in E_IIA.
+  apply andb_true_iff in E_IIA. destruct E_IIA as [_ E_rad].
+  simpl in E_rad.
+  destruct (compute_radiographic_level (ClinicalState.radiographic c))
+    as [|[|n]]; [discriminate | discriminate | lia].
+Qed.
+
+(* ================================================================ *)
+(* Consensus classifier: returns Some s only when both procedural   *)
+(* and declarative classifiers agree. Disagreement (the principled  *)
+(* PVG-without-pneumatosis case, plus a small enumerable residual)  *)
+(* yields None, surfacing the divergence to the caller rather than  *)
+(* picking one reading silently.                                    *)
+(* ================================================================ *)
+
+Definition stage_eqb (s1 s2 : Stage.t) : bool :=
+  Stage.to_nat s1 =? Stage.to_nat s2.
+
+Lemma stage_eqb_refl : forall s, stage_eqb s s = true.
+Proof. intro s. unfold stage_eqb. apply Nat.eqb_refl. Qed.
+
+Lemma stage_eqb_eq : forall s1 s2, stage_eqb s1 s2 = true <-> s1 = s2.
+Proof.
+  intros [] []; split; intro H; vm_compute in H;
+  try reflexivity; try discriminate; vm_compute; reflexivity.
+Qed.
+
+Definition classify_consensus (c : ClinicalState.t) : option Stage.t :=
+  let s_proc := Classification.classify c in
+  let s_decl := classify_declarative c in
+  if stage_eqb s_proc s_decl then Some s_proc else None.
+
+(* The consensus classifier returns Some iff both classifiers agree;
+   the returned stage equals each of them. *)
+Lemma consensus_some_iff : forall c s,
+  classify_consensus c = Some s <->
+  Classification.classify c = s /\ classify_declarative c = s.
+Proof.
+  intros c s. split.
+  - intro H. unfold classify_consensus in H.
+    destruct (stage_eqb (Classification.classify c) (classify_declarative c)) eqn:E;
+      [|discriminate].
+    apply stage_eqb_eq in E.
+    injection H as Hs. split; [exact Hs | rewrite <- Hs; symmetry; exact E].
+  - intros [Hp Hd]. unfold classify_consensus.
+    rewrite Hp, Hd, stage_eqb_refl. reflexivity.
+Qed.
+
+(* The consensus classifier returns None iff the two classifiers disagree. *)
+Lemma consensus_none_iff_disagree : forall c,
+  classify_consensus c = None <->
+  Classification.classify c <> classify_declarative c.
+Proof.
+  intros c. split.
+  - intro H. unfold classify_consensus in H.
+    destruct (stage_eqb (Classification.classify c) (classify_declarative c)) eqn:E;
+      [discriminate|].
+    intro Habs. apply stage_eqb_eq in Habs.
+    rewrite Habs in E. discriminate.
+  - intro H. unfold classify_consensus.
+    destruct (stage_eqb (Classification.classify c) (classify_declarative c)) eqn:E.
+    + apply stage_eqb_eq in E. contradiction.
+    + reflexivity.
+Qed.
+
+(* Surgical-boundary preservation through consensus: pneumoperitoneum
+   forces both classifiers to IIIB, so consensus returns Some IIIB. *)
+Lemma consensus_preserves_IIIB : forall c,
+  RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = true ->
+  classify_consensus c = Some Stage.IIIB.
+Proof.
+  intros c H. apply consensus_some_iff. split.
+  - apply Classification.pneumoperitoneum_forces_IIIB. exact H.
+  - apply classify_declarative_IIIB_on_perf. exact H.
+Qed.
+
+(* Consensus is at least as conservative as either classifier:
+   if consensus returns Some s, both individual classifiers agree on s. *)
+Lemma consensus_dominated_by_each : forall c s,
+  classify_consensus c = Some s ->
+  Stage.leb (Classification.classify c) s = true /\
+  Stage.leb (classify_declarative c) s = true.
+Proof.
+  intros c s H. apply consensus_some_iff in H. destruct H as [Hp Hd].
+  rewrite Hp, Hd. split; apply Nat.leb_refl.
+Qed.
+
+(* Consensus is total in the sense that it always terminates with
+   Some s or None — it's a deterministic decision over the two classifiers. *)
+Lemma consensus_total : forall c,
+  (exists s, classify_consensus c = Some s) \/ classify_consensus c = None.
+Proof.
+  intro c. unfold classify_consensus.
+  destruct (stage_eqb _ _).
+  - left. eexists. reflexivity.
+  - right. reflexivity.
+Qed.
+
+(* Closure theorem: with the refined compute_radiographic_level, no
+   patient with stage2a_findings alone (no PVG, no ascites, no
+   pneumatosis, no pneumoperitoneum) can reach declarative IIA.
+   The earlier divergence "intestinal dilation -> declarative IIA but
+   procedural IA" is now provably impossible. *)
+Theorem stage2a_alone_excludes_declarative_IIA : forall c,
+  RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = false ->
+  RadiographicSigns.stage2b_findings (ClinicalState.radiographic c) = false ->
+  RadiographicSigns.definite_nec_findings (ClinicalState.radiographic c) = false ->
+  classify_declarative c <> Stage.IIA.
+Proof.
+  intros c Hno_perf Hno_2b Hno_pneum H.
+  apply classify_declarative_IIA_requires_rad_level_2 in H.
+  unfold compute_radiographic_level in H.
+  rewrite Hno_perf, Hno_2b, Hno_pneum in H.
+  destruct (RadiographicSigns.stage2a_findings (ClinicalState.radiographic c));
+  destruct (RadiographicSigns.stage1_findings (ClinicalState.radiographic c));
+  lia.
 Qed.
 
 End BellCriteria.

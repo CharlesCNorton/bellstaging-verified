@@ -23,6 +23,11 @@ From BellStaging Require Import BellClassification.
 Import ListNotations.
 Open Scope string_scope.
 
+(* gen_labs uses literal nats up to 10000 in choose ranges; same advisory
+   as in BellStage.v. Suppressed here because the QC ranges are by design
+   not unary towers. *)
+Set Warnings "-abstract-large-number".
+
 (* --- Generators --- *)
 
 Definition gen_bool : G bool :=

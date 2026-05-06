@@ -1631,4 +1631,66 @@ Proof.
   destruct s; reflexivity.
 Qed.
 
+(* Single-pass classifier that incorporates organ failure assessment.
+   Returns one stage that already reflects MODS escalation, eliminating
+   the audit-trail ambiguity of the post-hoc modifier. The earlier API
+   recorded both the pre-modifier and post-modifier stages; with this
+   entry, audit trails record only the final stage. *)
+Definition classify_with_oa
+    (c : ClinicalState.t)
+    (oa : NeonatalOrganFailure.OrganFailureAssessment) : Stage.t :=
+  stage_with_organ_failure (Classification.classify c) oa.
+
+(* The single-pass form is definitionally equal to the post-hoc compose;
+   both forms are observationally indistinguishable. *)
+Lemma classify_with_oa_equals_compose : forall c oa,
+  classify_with_oa c oa =
+  stage_with_organ_failure (Classification.classify c) oa.
+Proof. reflexivity. Qed.
+
+(* Organ failure never decreases the stage produced by the classifier. *)
+Lemma classify_with_oa_dominates_classify : forall c oa,
+  Stage.to_nat (Classification.classify c) <=
+  Stage.to_nat (classify_with_oa c oa).
+Proof.
+  intros c oa. apply organ_failure_never_decreases_stage.
+Qed.
+
+(* Without MODS, the single-pass classifier matches the base classifier. *)
+Lemma classify_with_oa_no_mods_idempotent : forall c oa,
+  NeonatalOrganFailure.multiorgan_dysfunction oa = false ->
+  classify_with_oa c oa = Classification.classify c.
+Proof.
+  intros c oa H. unfold classify_with_oa, stage_with_organ_failure.
+  rewrite H. destruct (Classification.classify c); reflexivity.
+Qed.
+
+(* With MODS, the single-pass classifier reaches at least IIIA. *)
+Lemma classify_with_oa_mods_at_least_IIIA : forall c oa,
+  NeonatalOrganFailure.multiorgan_dysfunction oa = true ->
+  5 <= Stage.to_nat (classify_with_oa c oa).
+Proof.
+  intros c oa H. apply mods_forces_at_least_IIIA. exact H.
+Qed.
+
+(* The surgical boundary is preserved regardless of organ-failure modifier:
+   pneumoperitoneum forces IIIB even after MODS bump. *)
+Lemma classify_with_oa_preserves_IIIB : forall c oa,
+  RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = true ->
+  classify_with_oa c oa = Stage.IIIB.
+Proof.
+  intros c oa H. unfold classify_with_oa.
+  rewrite (Classification.pneumoperitoneum_forces_IIIB c H).
+  unfold stage_with_organ_failure.
+  destruct (NeonatalOrganFailure.multiorgan_dysfunction oa); reflexivity.
+Qed.
+
+(* Idempotence: re-applying the OA modifier to the single-pass result is a no-op. *)
+Lemma classify_with_oa_idempotent : forall c oa,
+  stage_with_organ_failure (classify_with_oa c oa) oa = classify_with_oa c oa.
+Proof.
+  intros c oa. unfold classify_with_oa.
+  apply stage_with_organ_failure_idempotent.
+Qed.
+
 End OrganFailureFeedback.
