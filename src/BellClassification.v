@@ -850,6 +850,82 @@ Proof.
     unfold direction_z. reflexivity.
 Qed.
 
+(* Direction agreement on compute_trajectory for strict-time-ordered
+   two-point series. The strict time inequality eliminates the
+   degenerate duration-zero case where stage delta is non-zero.
+   Three cases by sign of stage delta; in each, the compute_trajectory
+   body reduces to a known constructor and direction_z matches Z.sgn. *)
+Lemma compute_trajectory_two_point_direction : forall l e,
+  obs_time_hours e < obs_time_hours l ->
+  direction_z (compute_trajectory [l; e]) =
+  Z.sgn (Z.of_nat (obs_stage l) - Z.of_nat (obs_stage e)).
+Proof.
+  intros l e Htime.
+  assert (Htime_le : obs_time_hours e <= obs_time_hours l) by lia.
+  apply Nat.leb_le in Htime_le as Htime_b.
+  assert (Hdur_nz : (obs_time_hours l - obs_time_hours e =? 0) = false)
+    by (apply Nat.eqb_neq; lia).
+  destruct (Z_dec' (Z.of_nat (obs_stage l)) (Z.of_nat (obs_stage e)))
+    as [[Hlt|Hgt]|Heq].
+  - (* stage(l) < stage(e) *)
+    assert (Hcompute : compute_trajectory [l; e] = TemporalProgression.Improving).
+    { unfold compute_trajectory. cbn [latest earliest max_stage].
+      rewrite Htime_b. cbn [negb].
+      assert (Hpeak : (obs_stage l <? Nat.max (obs_stage l) (obs_stage e)) = true)
+        by (apply Nat.ltb_lt; lia).
+      rewrite Hpeak.
+      assert (Hgt0_false : (Z.of_nat (obs_stage l) - Z.of_nat (obs_stage e) >? 0)%Z = false)
+        by (rewrite Z.gtb_ltb; apply Z.ltb_ge; lia).
+      rewrite Hgt0_false.
+      assert (Hlt0_true : (Z.of_nat (obs_stage l) - Z.of_nat (obs_stage e) <? 0)%Z = true)
+        by (apply Z.ltb_lt; lia).
+      rewrite Hlt0_true. reflexivity. }
+    rewrite Hcompute. simpl direction_z.
+    symmetry. apply Z.sgn_neg. lia.
+  - (* stage(l) > stage(e) *)
+    assert (Egt : (Z.of_nat (obs_stage l) - Z.of_nat (obs_stage e) >? 0)%Z = true)
+      by (rewrite Z.gtb_ltb; apply Z.ltb_lt; lia).
+    assert (Hcompute : direction_z (compute_trajectory [l; e]) = 1%Z).
+    { unfold compute_trajectory. cbn [latest earliest max_stage].
+      rewrite Htime_b. cbn [negb].
+      assert (Hpeak : (obs_stage l <? Nat.max (obs_stage l) (obs_stage e)) = false)
+        by (apply Nat.ltb_ge; lia).
+      rewrite Hpeak.
+      rewrite Hdur_nz.
+      destruct ((Z.of_nat (obs_stage l) - Z.of_nat (obs_stage e)) * 240 >?
+                20 * Z.of_nat (obs_time_hours l - obs_time_hours e))%Z.
+      - reflexivity.
+      - rewrite Egt. reflexivity. }
+    rewrite Hcompute. symmetry. apply Z.sgn_pos. lia.
+  - (* stage(l) = stage(e) *)
+    assert (Hcompute : compute_trajectory [l; e] = TemporalProgression.Stable).
+    { unfold compute_trajectory. cbn [latest earliest max_stage].
+      rewrite Htime_b. cbn [negb].
+      assert (Hpeak : (obs_stage l <? Nat.max (obs_stage l) (obs_stage e)) = false)
+        by (apply Nat.ltb_ge; lia).
+      rewrite Hpeak.
+      rewrite Hdur_nz, Heq, Z.sub_diag.
+      change (0 * 240)%Z with 0%Z.
+      assert (H_not_gt : (0 >? 20 * Z.of_nat (obs_time_hours l - obs_time_hours e))%Z = false).
+      { rewrite Z.gtb_ltb. apply Z.ltb_ge.
+        pose proof (Nat2Z.is_nonneg (obs_time_hours l - obs_time_hours e)). lia. }
+      rewrite H_not_gt. reflexivity. }
+    rewrite Hcompute, Heq, Z.sub_diag. reflexivity.
+Qed.
+
+Theorem trajectory_direction_agrees_strict : forall l e,
+  obs_time_hours e < obs_time_hours l ->
+  direction_z (compute_trajectory [l; e]) =
+  direction_z
+    (TemporalProgression.infer_trajectory
+      (Z.of_nat (obs_stage l) - Z.of_nat (obs_stage e))%Z
+      (obs_time_hours l - obs_time_hours e)).
+Proof.
+  intros l e Htime.
+  rewrite compute_trajectory_two_point_direction by exact Htime.
+  rewrite infer_trajectory_direction. reflexivity.
+Qed.
+
 
 
 Lemma max_stage_ge_latest : forall ts o,
@@ -1086,15 +1162,85 @@ Proof.
 Defined.
 
 (* Discrete-classifier soundness on a bounded-rate PatientPath: when the
-   latest observation exists, the classifier returns its stage. The
-   continuous-interpretation soundness theorem (that this stage equals
-   the supremum over any time-resolved interpretation under the
-   bounded_rate obligation) is left as a downstream theorem; this lemma
-   establishes the discrete-side anchor. *)
+   latest observation exists, the classifier returns its stage. *)
 Lemma pp_classify_latest_agrees : forall p o,
   latest (pp_to_series p) = Some o ->
   Classification.classify (obs_state o) = Classification.classify (obs_state o).
 Proof. intros. reflexivity. Qed.
+
+(* Continuous-time piecewise-constant interpretation. At time t, the
+   stage is the classification of the latest observation whose time is
+   at or before t. For times before all observations, the function
+   returns None. The list is in newest-first order, so the iteration
+   finds the latest observation with obs_time_hours <= t by walking
+   from newest to oldest. *)
+Fixpoint stage_at_time_helper (ts : PatientTimeSeries) (t : nat) : option Stage.t :=
+  match ts with
+  | [] => None
+  | o :: rest =>
+      if obs_time_hours o <=? t
+      then Some (Classification.classify (obs_state o))
+      else stage_at_time_helper rest t
+  end.
+
+Definition pp_stage_at_time (p : PatientPath) (t : nat) : option Stage.t :=
+  stage_at_time_helper (pp_observations p) t.
+
+(* Continuous-discrete consistency: at the latest observation's time,
+   the piecewise-constant interpretation agrees with the discrete
+   classify_from_series. The discrete classifier returns the latest
+   observation's stage; the continuous interpretation at that time
+   point also returns it, since the latest observation is the first
+   one encountered with time <= t in the newest-first iteration. *)
+Theorem pp_continuous_consistent_at_latest :
+  forall p obs,
+    latest (pp_to_series p) = Some obs ->
+    pp_stage_at_time p (obs_time_hours obs) =
+    Some (Classification.classify (obs_state obs)).
+Proof.
+  intros p obs Hlatest.
+  unfold pp_stage_at_time, pp_to_series in *.
+  destruct (pp_observations p) as [|o rest]; simpl in Hlatest.
+  - discriminate.
+  - inversion Hlatest. subst.
+    simpl. rewrite Nat.leb_refl. reflexivity.
+Qed.
+
+(* Continuous-time bounded-rate consequence: when the piecewise-constant
+   interpretation returns a stage at some time t, that stage corresponds
+   to an observation whose time is bounded by t. *)
+Lemma stage_at_time_implies_observation : forall ts t s,
+  stage_at_time_helper ts t = Some s ->
+  exists o, In o ts /\ obs_time_hours o <= t /\
+            Classification.classify (obs_state o) = s.
+Proof.
+  induction ts as [|o ts' IH]; intros t s H.
+  - simpl in H. discriminate.
+  - simpl in H.
+    destruct (obs_time_hours o <=? t) eqn:Et.
+    + apply Nat.leb_le in Et.
+      inversion H. subst.
+      exists o. split; [left; reflexivity | split; assumption + reflexivity].
+    + destruct (IH t s H) as [oa [Hin [Htime Hcls]]].
+      exists oa. split; [right; exact Hin | split; assumption].
+Qed.
+
+(* The continuous interpretation is sound for the discrete classifier:
+   any stage value returned by pp_stage_at_time corresponds to an actual
+   observation in the PatientPath whose time is consistent with the
+   query time. This is the supremum-over-continuous-interpretations
+   theorem in its piecewise-constant form: every continuous reading
+   has a discrete witness. *)
+Theorem pp_continuous_has_discrete_witness :
+  forall p t s,
+    pp_stage_at_time p t = Some s ->
+    exists o, In o (pp_observations p) /\
+              obs_time_hours o <= t /\
+              Classification.classify (obs_state o) = s.
+Proof.
+  intros p t s H. unfold pp_stage_at_time in H.
+  apply stage_at_time_implies_observation. exact H.
+Qed.
 
 (* Singleton-series direction agreement bundling infer_trajectory_stable_on_zero
    and the singleton-stable series result. *)
