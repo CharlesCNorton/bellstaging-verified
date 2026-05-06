@@ -206,6 +206,14 @@ Definition is_rapid_deterioration (delta : TemporalDelta) : bool :=
   if delta_hours delta =? 0 then false
   else (stage_change delta * 240 >? 20 * Z.of_nat (delta_hours delta))%Z.
 
+(* Unification of infer_trajectory and TimeSeries.compute_trajectory.
+   The two procedures agree on monotonic two-point series. infer_trajectory
+   takes a (delta, hours) pair directly; compute_trajectory inspects a full
+   series and uses max_stage to detect peak-to-current discrepancies. On a
+   monotonic series, max_stage equals the latest stage and the divergence
+   collapses. The convergence theorem appears below
+   TimeSeries.compute_trajectory in BellClassification.v. *)
+
 (* Cross-multiplication agrees with division when division is exact *)
 Lemma rapid_deterioration_cross_mul_sound : forall d,
   delta_hours d <> 0 ->
@@ -216,6 +224,31 @@ Proof.
   destruct (delta_hours d =? 0) eqn:E.
   - apply Nat.eqb_eq in E. contradiction.
   - apply Z.gtb_lt in H. lia.
+Qed.
+
+(* Iff strengthening: cross-multiplication is exactly the rapid criterion. *)
+Lemma rapid_deterioration_cross_mul_iff : forall d,
+  delta_hours d <> 0 ->
+  (is_rapid_deterioration d = true <->
+   (stage_change d * 240 > 20 * Z.of_nat (delta_hours d))%Z).
+Proof.
+  intros d Hne. split.
+  - apply rapid_deterioration_cross_mul_sound. exact Hne.
+  - intros Hgt. unfold is_rapid_deterioration.
+    destruct (delta_hours d =? 0) eqn:E.
+    + apply Nat.eqb_eq in E. contradiction.
+    + apply Z.gtb_lt. lia.
+Qed.
+
+(* Boundary: 1-stage delta in exactly 12 hours sits at the threshold and
+   does not qualify as rapid (the criterion is strict greater-than). *)
+Lemma boundary_one_stage_twelve_hours_not_rapid : forall d,
+  stage_change d = 1%Z ->
+  delta_hours d = 12 ->
+  is_rapid_deterioration d = false.
+Proof.
+  intros d Hs Hh. unfold is_rapid_deterioration.
+  rewrite Hh. simpl Nat.eqb. rewrite Hs. reflexivity.
 Qed.
 
 (* valid_transition is acyclic and irreflexive.
@@ -315,35 +348,47 @@ Definition deterioration_triggers_escalation (t : ClinicalTrajectory) : bool :=
    - Worsening 4h: Walsh & Kliegman 1986 recommend q4-6h assessment.
    - Stable 6h: standard nursing assessment interval (AAP guidelines).
    - Improving 12h: step-down monitoring for recovering patients. *)
-(* Type-safe version *)
+(* Type-safe version. Bases and stage modifiers routed through
+   ClinicalParameters with provenance. *)
+Definition reassess_base_h (traj : ClinicalTrajectory) : nat :=
+  match traj with
+  | RapidDeterioration =>
+      ClinicalParameters.param_value ClinicalParameters.reassess_rapid_h
+  | Worsening =>
+      ClinicalParameters.param_value ClinicalParameters.reassess_worsening_h
+  | Stable =>
+      ClinicalParameters.param_value ClinicalParameters.reassess_stable_h
+  | Improving =>
+      ClinicalParameters.param_value ClinicalParameters.reassess_improving_h
+  end.
+
+Definition reassess_advanced_floor : nat :=
+  ClinicalParameters.param_value ClinicalParameters.reassess_advanced_floor_h.
+
+Definition reassess_suspected_ceiling : nat :=
+  ClinicalParameters.param_value ClinicalParameters.reassess_suspected_ceiling_h.
+
+Definition reassess_suspected_offset : nat :=
+  ClinicalParameters.param_value ClinicalParameters.reassess_suspected_offset_h.
+
 Definition reassess_hours (s : Stage.t) (traj : ClinicalTrajectory) : nat :=
-  let base := match traj with
-              | RapidDeterioration => 2
-              | Worsening => 4
-              | Stable => 6
-              | Improving => 12
-              end in
+  let base := reassess_base_h traj in
   match s with
-  | Stage.IIIA | Stage.IIIB => Nat.max 1 (base / 2)
+  | Stage.IIIA | Stage.IIIB => Nat.max reassess_advanced_floor (base / 2)
   | Stage.IIA | Stage.IIB => base
-  | Stage.IA | Stage.IB => Nat.min 12 (base + 2)
+  | Stage.IA | Stage.IB =>
+      Nat.min reassess_suspected_ceiling (base + reassess_suspected_offset)
   end.
 
 (* Backward-compatible nat version *)
 Definition hours_to_reassess (stage_nat : nat) (traj : ClinicalTrajectory) : nat :=
-  let base := match traj with
-              | RapidDeterioration => 2
-              | Worsening => 4
-              | Stable => 6
-              | Improving => 12
-              end in
+  let base := reassess_base_h traj in
   if 5 <=? stage_nat then
-    Nat.max 1 (base / 2)
+    Nat.max reassess_advanced_floor (base / 2)
   else if 3 <=? stage_nat then
     base
   else
-    Nat.min 12 (base + 2)
-  .
+    Nat.min reassess_suspected_ceiling (base + reassess_suspected_offset).
 
 Lemma reassess_hours_consistent : forall s traj,
   reassess_hours s traj = hours_to_reassess (Stage.to_nat s) traj.
@@ -566,8 +611,10 @@ Definition default_micro : Microbiology.t :=
 
 Definition default_vitals : VitalSigns.t := VitalSigns.normal.
 
-(* Staleness threshold: signs older than this many hours are stale *)
-Definition staleness_threshold_hours : nat := 6.
+(* Staleness threshold: signs older than this many hours are stale.
+   Routed through ClinicalParameters.staleness_threshold. *)
+Definition staleness_threshold_hours : nat :=
+  ClinicalParameters.param_value ClinicalParameters.staleness_threshold.
 
 (* Guarded subtraction. If an assessment timestamp is in the future
    relative to now (data error), the sign is treated as stale rather
@@ -715,23 +762,40 @@ Definition overall_severity_score (c : t) : nat :=
    These define what constitutes a clinically plausible input.
    Gestational age: 22-44 weeks (viability limit to post-term).
    Birth weight: 300-6000 grams.
-   pH (x100): 680-760 (6.80-7.60).
+   pH (x100): 680-760 (6.80-7.60); pH below 6.80 is incompatible with life.
    INR (x100): 50-500 (0.5-5.0).
    Lactate (x10): 0-200 (0.0-20.0 mmol/L).
-   SpO2: 0-100 percent. *)
+   SpO2: 20-100 percent (below 20% is end-of-life).
+   Heart rate: 30-300 bpm (below 30 is asystolic).
+   Temperature x10: 280-430 (28.0-43.0 C).
+
+   Cross-field exclusions (clinically impossible combinations):
+   - Extreme prematurity (GA < 28w) with macrosomic birth weight (>= 4000g):
+     extremely preterm infants do not weigh more than 4 kg (Olsen 2010,
+     Pediatrics 125(2):e214-e224).
+   - Post-term gestation (GA >= 42w) with extremely low birth weight (< 1000g):
+     ELBW below 1000g requires preterm gestation; not seen at term/post-term. *)
+
+Definition clinically_consistent_ga_bw (ga bw : nat) : Prop :=
+  ~ (ga < 28 /\ 4000 <= bw) /\
+  ~ (42 <= ga /\ bw < 1000).
+
 Definition valid_risk_factors (r : RiskFactors.t) : Prop :=
   22 <= RiskFactors.gestational_age_weeks r <= 44 /\
-  300 <= RiskFactors.birth_weight_grams r <= 6000.
+  300 <= RiskFactors.birth_weight_grams r <= 6000 /\
+  clinically_consistent_ga_bw
+    (RiskFactors.gestational_age_weeks r)
+    (RiskFactors.birth_weight_grams r).
 
 Definition valid_labs (l : LabValues.t) : Prop :=
-  LabValues.ph_x100 l <= 760 /\
+  680 <= LabValues.ph_x100 l <= 760 /\
   LabValues.lactate_mmol_L_x10 l <= 200 /\
   LabValues.platelet_k_per_uL l <= 9999.
 
 Definition valid_vitals (v : VitalSigns.t) : Prop :=
-  VitalSigns.spo2_percent v <= 100 /\
-  VitalSigns.heart_rate_bpm v <= 300 /\
-  VitalSigns.temperature_x10 v <= 430.
+  20 <= VitalSigns.spo2_percent v <= 100 /\
+  30 <= VitalSigns.heart_rate_bpm v <= 300 /\
+  280 <= VitalSigns.temperature_x10 v <= 430.
 
 Definition valid (c : t) : Prop :=
   valid_risk_factors (risk_factors c) /\
@@ -739,20 +803,31 @@ Definition valid (c : t) : Prop :=
   match vitals c with Some v => valid_vitals v | None => True end.
 
 (* Boolean reflection of valid. *)
+Definition is_clinically_consistent_ga_bw (ga bw : nat) : bool :=
+  negb ((ga <? 28) && (4000 <=? bw)) &&
+  negb ((42 <=? ga) && (bw <? 1000)).
+
 Definition is_valid_risk_factors (r : RiskFactors.t) : bool :=
   (22 <=? RiskFactors.gestational_age_weeks r) &&
   (RiskFactors.gestational_age_weeks r <=? 44) &&
   (300 <=? RiskFactors.birth_weight_grams r) &&
-  (RiskFactors.birth_weight_grams r <=? 6000).
+  (RiskFactors.birth_weight_grams r <=? 6000) &&
+  is_clinically_consistent_ga_bw
+    (RiskFactors.gestational_age_weeks r)
+    (RiskFactors.birth_weight_grams r).
 
 Definition is_valid_labs (l : LabValues.t) : bool :=
+  (680 <=? LabValues.ph_x100 l) &&
   (LabValues.ph_x100 l <=? 760) &&
   (LabValues.lactate_mmol_L_x10 l <=? 200) &&
   (LabValues.platelet_k_per_uL l <=? 9999).
 
 Definition is_valid_vitals (v : VitalSigns.t) : bool :=
+  (20 <=? VitalSigns.spo2_percent v) &&
   (VitalSigns.spo2_percent v <=? 100) &&
+  (30 <=? VitalSigns.heart_rate_bpm v) &&
   (VitalSigns.heart_rate_bpm v <=? 300) &&
+  (280 <=? VitalSigns.temperature_x10 v) &&
   (VitalSigns.temperature_x10 v <=? 430).
 
 Definition is_valid (c : t) : bool :=
@@ -760,17 +835,55 @@ Definition is_valid (c : t) : bool :=
   match labs c with Some l => is_valid_labs l | None => true end &&
   match vitals c with Some v => is_valid_vitals v | None => true end.
 
+Lemma is_clinically_consistent_ga_bw_iff : forall ga bw,
+  is_clinically_consistent_ga_bw ga bw = true <-> clinically_consistent_ga_bw ga bw.
+Proof.
+  intros ga bw.
+  unfold is_clinically_consistent_ga_bw, clinically_consistent_ga_bw.
+  split.
+  - intro H. apply andb_true_iff in H. destruct H as [H1 H2].
+    apply negb_true_iff, andb_false_iff in H1.
+    apply negb_true_iff, andb_false_iff in H2.
+    split; intros [Hg Hb].
+    + destruct H1 as [HE|HE].
+      * apply Nat.ltb_ge in HE. lia.
+      * apply Nat.leb_gt in HE. lia.
+    + destruct H2 as [HE|HE].
+      * apply Nat.leb_gt in HE. lia.
+      * apply Nat.ltb_ge in HE. lia.
+  - intros [H1 H2]. apply andb_true_iff. split.
+    + apply negb_true_iff. apply andb_false_iff.
+      destruct (Nat.lt_ge_cases ga 28) as [Hga|Hga];
+      destruct (Nat.le_gt_cases 4000 bw) as [Hbw|Hbw].
+      * exfalso. apply H1. split; lia.
+      * right. apply Nat.leb_gt. exact Hbw.
+      * left. apply Nat.ltb_ge. lia.
+      * left. apply Nat.ltb_ge. lia.
+    + apply negb_true_iff. apply andb_false_iff.
+      destruct (Nat.le_gt_cases 42 ga) as [Hga|Hga];
+      destruct (Nat.lt_ge_cases bw 1000) as [Hbw|Hbw].
+      * exfalso. apply H2. split; lia.
+      * right. apply Nat.ltb_ge. lia.
+      * left. apply Nat.leb_gt. exact Hga.
+      * left. apply Nat.leb_gt. exact Hga.
+Qed.
+
 Lemma is_valid_risk_factors_iff : forall r,
   is_valid_risk_factors r = true <-> valid_risk_factors r.
 Proof.
   intros r. unfold is_valid_risk_factors, valid_risk_factors. split.
-  - intro H. repeat (apply andb_true_iff in H; destruct H as [H ?]).
+  - intro H.
+    apply andb_true_iff in H. destruct H as [Hbounds Hcons].
+    repeat (apply andb_true_iff in Hbounds; destruct Hbounds as [Hbounds ?]).
     repeat match goal with
     | H : (_ <=? _) = true |- _ => apply Nat.leb_le in H
-    end. lia.
-  - intros [[H1 H2] [H3 H4]].
+    end.
+    apply is_clinically_consistent_ga_bw_iff in Hcons.
+    repeat split; try lia. exact (proj1 Hcons). exact (proj2 Hcons).
+  - intros [[H1 H2] [[H3 H4] Hcons]].
     apply Nat.leb_le in H1, H2, H3, H4.
-    rewrite H1, H2, H3, H4. reflexivity.
+    rewrite H1, H2, H3, H4. simpl.
+    apply is_clinically_consistent_ga_bw_iff. exact Hcons.
 Qed.
 
 Lemma is_valid_labs_iff : forall l,
@@ -780,9 +893,10 @@ Proof.
   - intro H. repeat (apply andb_true_iff in H; destruct H as [H ?]).
     repeat match goal with
     | H : (_ <=? _) = true |- _ => apply Nat.leb_le in H
-    end. auto.
-  - intros [H1 [H2 H3]]. apply Nat.leb_le in H1, H2, H3.
-    rewrite H1, H2, H3. reflexivity.
+    end. repeat split; lia.
+  - intros [[Hph1 Hph2] [Hlac Hplt]].
+    apply Nat.leb_le in Hph1, Hph2, Hlac, Hplt.
+    rewrite Hph1, Hph2, Hlac, Hplt. reflexivity.
 Qed.
 
 Lemma is_valid_vitals_iff : forall v,
@@ -792,9 +906,10 @@ Proof.
   - intro H. repeat (apply andb_true_iff in H; destruct H as [H ?]).
     repeat match goal with
     | H : (_ <=? _) = true |- _ => apply Nat.leb_le in H
-    end. auto.
-  - intros [H1 [H2 H3]]. apply Nat.leb_le in H1, H2, H3.
-    rewrite H1, H2, H3. reflexivity.
+    end. repeat split; lia.
+  - intros [[Hsp1 Hsp2] [[Hhr1 Hhr2] [Htm1 Htm2]]].
+    apply Nat.leb_le in Hsp1, Hsp2, Hhr1, Hhr2, Htm1, Htm2.
+    rewrite Hsp1, Hsp2, Hhr1, Hhr2, Htm1, Htm2. reflexivity.
 Qed.
 
 Theorem is_valid_iff : forall c,

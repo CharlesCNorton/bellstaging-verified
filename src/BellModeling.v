@@ -13,10 +13,10 @@ From BellStaging Require Import BellSerialization.
 Import ListNotations.
 
 (* ================================================================ *)
-(* Extended clinical modeling — cures 29-59                         *)
+(* Extended clinical modeling                                       *)
 (* ================================================================ *)
 
-(* Cure 29: SIP-specific treatment protocol *)
+(* SIP-specific treatment protocol *)
 Module SIPProtocol.
 
 Inductive SIPTreatment : Type :=
@@ -60,7 +60,7 @@ Qed.
 
 End SIPProtocol.
 
-(* Cure 30: NEC extent and totalis modeling *)
+(* NEC extent and totalis modeling *)
 Module NECExtent.
 
 Inductive Extent : Type :=
@@ -107,7 +107,7 @@ Qed.
 
 End NECExtent.
 
-(* Cure 31-32: Expanded surgical procedure selection *)
+(* Expanded surgical procedure selection *)
 Module ExpandedSurgical.
 
 Definition procedure_selection
@@ -157,7 +157,7 @@ Qed.
 
 End ExpandedSurgical.
 
-(* Cure 33: Antibiotic de-escalation *)
+(* Antibiotic de-escalation *)
 Module AntibioticStewardship.
 
 Definition deescalation_regimen (current : Antibiotics.Regimen)
@@ -185,7 +185,7 @@ Proof. intros r. reflexivity. Qed.
 
 End AntibioticStewardship.
 
-(* Cure 34: Antibiotic adverse effects *)
+(* Antibiotic adverse effects *)
 Module AntibioticAdverseEffects.
 
 Inductive AdverseRisk : Type :=
@@ -222,7 +222,7 @@ Proof. intros []; simpl; lia. Qed.
 
 End AntibioticAdverseEffects.
 
-(* Cure 35: GA-adjusted lab thresholds *)
+(* GA-adjusted lab thresholds *)
 Module GAAdjustedLabs.
 
 Definition neutropenia_threshold (ga_weeks : nat) : nat :=
@@ -259,7 +259,7 @@ Qed.
 
 End GAAdjustedLabs.
 
-(* Cure 36: Serial biomarker trending *)
+(* Serial biomarker trending *)
 Module BiomarkerTrending.
 
 Inductive Trend : Type :=
@@ -303,7 +303,7 @@ Qed.
 
 End BiomarkerTrending.
 
-(* Cure 37: Vital sign trending *)
+(* Vital sign trending *)
 Module VitalSignTrending.
 
 Record VitalTrends : Type := MkVitalTrends {
@@ -331,7 +331,7 @@ Qed.
 
 End VitalSignTrending.
 
-(* Cure 38: Feeding status as classification input *)
+(* Feeding status as classification input *)
 Module FeedingStatus.
 
 Inductive CurrentFeeding : Type :=
@@ -360,7 +360,7 @@ Qed.
 
 End FeedingStatus.
 
-(* Cure 39: NPO compliance *)
+(* NPO compliance *)
 Module NPOCompliance.
 
 Inductive ComplianceStatus : Type :=
@@ -389,7 +389,7 @@ Proof. reflexivity. Qed.
 
 End NPOCompliance.
 
-(* Cure 40: NEC recurrence *)
+(* NEC recurrence *)
 Module Recurrence.
 
 Definition recurrence_risk_percent (had_prior_nec : bool)
@@ -412,7 +412,7 @@ Proof. intros s. reflexivity. Qed.
 
 End Recurrence.
 
-(* Cure 41: Short bowel syndrome progression *)
+(* Short bowel syndrome progression *)
 Module SBSProgression.
 
 Inductive SBSPhase : Type :=
@@ -450,7 +450,7 @@ Qed.
 
 End SBSProgression.
 
-(* Cure 42: Enhanced risk ranges with provenance *)
+(* Enhanced risk ranges with provenance *)
 Module EnhancedPrognosis.
 
 Record EnhancedRiskRange : Type := MkEnhanced {
@@ -486,7 +486,7 @@ Proof. intros []; simpl; lia. Qed.
 
 End EnhancedPrognosis.
 
-(* Cure 43: Documented calibration methodology *)
+(* Documented calibration methodology *)
 Module CalibrationNotes.
 
 (* DifferentialDiagnosis confidence weights are editorial estimates.
@@ -513,7 +513,7 @@ Qed.
 
 End CalibrationNotes.
 
-(* Cure 44: NEC prevention model *)
+(* NEC prevention model *)
 Module Prevention.
 
 Record PreventionInterventions : Type := MkPrevention {
@@ -559,7 +559,7 @@ Proof. intros [] [] []; vm_compute; lia. Qed.
 
 End Prevention.
 
-(* Cure 45: Diagnostic confidence model *)
+(* Diagnostic confidence model *)
 Module DiagnosticConfidence.
 
 Inductive ConfidenceLevel : Type :=
@@ -604,7 +604,7 @@ Proof. intros c H. unfold staging_confidence. rewrite H. reflexivity. Qed.
 
 End DiagnosticConfidence.
 
-(* Cure 46: Organ failure attribution *)
+(* Organ failure attribution *)
 Module OrganFailureAttribution.
 
 Inductive FailureCause : Type :=
@@ -641,7 +641,7 @@ Proof. reflexivity. Qed.
 
 End OrganFailureAttribution.
 
-(* Cure 47: Graded organ dysfunction *)
+(* Graded organ dysfunction *)
 Module GradedOrganDysfunction.
 
 Definition total_dysfunction_score
@@ -664,7 +664,7 @@ Proof. intros oa. unfold dysfunction_severity. lia. Qed.
 
 End GradedOrganDysfunction.
 
-(* Cure 48: Clinical workflow model *)
+(* Clinical workflow model *)
 Module ClinicalWorkflow.
 
 Inductive WorkflowAction : Type :=
@@ -714,7 +714,7 @@ Qed.
 
 End ClinicalWorkflow.
 
-(* Cure 49: Resource constraints *)
+(* Resource constraints *)
 Module ResourceConstraints.
 
 Record NICUResources : Type := MkResources {
@@ -743,7 +743,7 @@ Proof. intros r. reflexivity. Qed.
 
 End ResourceConstraints.
 
-(* Cure 50: Family decision model *)
+(* Family decision model *)
 Module FamilyDecisions.
 
 Inductive GoalsOfCare : Type :=
@@ -784,7 +784,7 @@ Proof. intros []; simpl; lia. Qed.
 
 End FamilyDecisions.
 
-(* Cure 51: Clinical model versioning *)
+(* Clinical model versioning *)
 Module ModelVersion.
 
 Record Version : Type := MkVersion {
@@ -824,7 +824,7 @@ Proof. intros. unfold backward_compatible. simpl. auto. Qed.
 
 End ModelVersion.
 
-(* Cure 52: Audit trail *)
+(* Audit trail *)
 Module AuditTrail.
 
 Record AuditEntry : Type := MkAuditEntry {
@@ -866,7 +866,7 @@ Proof. intros ts1 ts2 c. split; reflexivity. Qed.
 
 End AuditTrail.
 
-(* Cure 53: Serialization specification *)
+(* Serialization specification *)
 Module SerializationSpec.
 
 (* FHIR resource mapping specification.
@@ -908,7 +908,7 @@ Proof. exact Serialization.cs_roundtrip. Qed.
 
 End SerializationSpec.
 
-(* Cure 54: EHR integration specification *)
+(* EHR integration specification *)
 Module EHRIntegration.
 
 Inductive APIEndpoint : Type :=
@@ -940,7 +940,7 @@ Proof. intros []; unfold all_endpoints; simpl; auto 6. Qed.
 
 End EHRIntegration.
 
-(* Cure 55: Localization support *)
+(* Localization support *)
 Module Localization.
 
 Record InstitutionalConfig : Type := MkConfig {
@@ -971,7 +971,7 @@ Proof. simpl. repeat split; reflexivity. Qed.
 
 End Localization.
 
-(* Cure 56: Population model *)
+(* Population model *)
 Module PopulationModel.
 
 Record CohortSummary : Type := MkCohort {
@@ -1016,7 +1016,7 @@ Qed.
 
 End PopulationModel.
 
-(* Cure 57: Confidence scoring specification *)
+(* Confidence scoring specification *)
 Module ConfidenceScoring.
 
 (* The nec_confidence and sip_confidence scores in DifferentialDiagnosis
@@ -1062,7 +1062,7 @@ Qed.
 
 End ConfidenceScoring.
 
-(* Cure 58: Extraction refinement specification *)
+(* Extraction refinement specification *)
 Module ExtractionRefinement.
 
 (* A formal refinement proof would show:
@@ -1087,7 +1087,7 @@ Proof. intro c. exact (Serialization.classify_serialized_agrees c). Qed.
 
 End ExtractionRefinement.
 
-(* Cure 59: Formal equivalence statement *)
+(* Formal equivalence statement *)
 Module WalshKliegmanEquivalence.
 
 (* Walsh-Kliegman 1986, Table 1 defines:

@@ -510,4 +510,38 @@ Lemma ser_stage_fhir_agrees : forall s,
            ("stageNumeric", JNat (Stage.to_nat s))].
 Proof. reflexivity. Qed.
 
+(* Minimal FHIR R4 schema check: a JObject must carry a resourceType
+   field with one of the canonical R4 resource types. The check below
+   covers the resource types used by ser_cs_fhir and ser_stage_fhir
+   (Bundle, Patient, Observation, Condition, DiagnosticReport). A full
+   FHIR R4 schema would additionally constrain mandatory subfields per
+   resource type; this check verifies the resourceType discriminator. *)
+Definition is_fhir_resource_type (s : string) : bool :=
+  String.eqb s "Bundle" || String.eqb s "Patient" ||
+  String.eqb s "Observation" || String.eqb s "Condition" ||
+  String.eqb s "DiagnosticReport".
+
+Fixpoint find_resource_type (entries : list (string * JValue)) : option string :=
+  match entries with
+  | nil => None
+  | (k, JStr v) :: rest =>
+      if String.eqb k "resourceType" then Some v
+      else find_resource_type rest
+  | _ :: rest => find_resource_type rest
+  end.
+
+Definition fhir_object_compliant (j : JValue) : bool :=
+  match j with
+  | JObject entries =>
+      match find_resource_type entries with
+      | Some t => is_fhir_resource_type t
+      | None => false
+      end
+  | _ => false
+  end.
+
+Lemma ser_stage_fhir_compliant : forall s,
+  fhir_object_compliant (ser_stage_fhir s) = true.
+Proof. intros s. unfold ser_stage_fhir, fhir_object_compliant. reflexivity. Qed.
+
 End Serialization.

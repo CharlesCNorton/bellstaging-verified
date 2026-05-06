@@ -615,4 +615,227 @@ Proof.
   lia.
 Qed.
 
+(* Independence theorems for classify_declarative, mirroring the
+   SafetyProperties suite for Classification.classify. The declarative
+   classifier reads systemic, intestinal, radiographic, labs, coag, vitals;
+   it does not consume hours_since_symptom_onset, neuro_status, or micro. *)
+
+Theorem classify_declarative_independent_of_timestamp : forall c h,
+  classify_declarative c =
+  classify_declarative
+    (ClinicalState.MkClinicalState
+      (ClinicalState.risk_factors c) (ClinicalState.labs c)
+      (ClinicalState.coag c) (ClinicalState.micro c)
+      (ClinicalState.vitals c) (ClinicalState.systemic c)
+      (ClinicalState.intestinal c) (ClinicalState.radiographic c)
+      (ClinicalState.neuro_status c) h
+      (ClinicalState.systemic_assessed_h c)
+      (ClinicalState.intestinal_assessed_h c)
+      (ClinicalState.radiographic_assessed_h c)).
+Proof.
+  intros c h. unfold classify_declarative, meets_criteria,
+    compute_systemic_level, compute_intestinal_level,
+    compute_radiographic_level.
+  destruct c; reflexivity.
+Qed.
+
+Theorem classify_declarative_independent_of_neuro : forall c n,
+  classify_declarative c =
+  classify_declarative
+    (ClinicalState.MkClinicalState
+      (ClinicalState.risk_factors c) (ClinicalState.labs c)
+      (ClinicalState.coag c) (ClinicalState.micro c)
+      (ClinicalState.vitals c) (ClinicalState.systemic c)
+      (ClinicalState.intestinal c) (ClinicalState.radiographic c)
+      n (ClinicalState.hours_since_symptom_onset c)
+      (ClinicalState.systemic_assessed_h c)
+      (ClinicalState.intestinal_assessed_h c)
+      (ClinicalState.radiographic_assessed_h c)).
+Proof.
+  intros c n. unfold classify_declarative, meets_criteria,
+    compute_systemic_level, compute_intestinal_level,
+    compute_radiographic_level.
+  destruct c; reflexivity.
+Qed.
+
+(* Abstract input tuple for classify_declarative: the three computed levels
+   (systemic, intestinal, radiographic) suffice to determine the stage,
+   since meets_criteria reads only those levels. The faithfulness lemma
+   below establishes the bridge to the concrete classifier. *)
+Record ClassifierDeclInputs : Type := MkDeclCI {
+  decl_ci_sys_level : nat;
+  decl_ci_int_level : nat;
+  decl_ci_rad_level : nat
+}.
+
+Definition extract_decl_ci (c : ClinicalState.t) : ClassifierDeclInputs :=
+  MkDeclCI
+    (compute_systemic_level c)
+    (compute_intestinal_level (ClinicalState.intestinal c))
+    (compute_radiographic_level (ClinicalState.radiographic c)).
+
+(* Level-based reformulation of classify_declarative. Each stage's criteria
+   are translated into a level threshold on the abstract input. *)
+Definition classify_decl_inputs (ci : ClassifierDeclInputs) : Stage.t :=
+  if 3 <=? decl_ci_rad_level ci then Stage.IIIB
+  else if (3 <=? decl_ci_sys_level ci) && (3 <=? decl_ci_int_level ci) &&
+          (2 <=? decl_ci_rad_level ci) then Stage.IIIA
+  else if (2 <=? decl_ci_sys_level ci) && (2 <=? decl_ci_int_level ci) &&
+          (2 <=? decl_ci_rad_level ci) then Stage.IIB
+  else if (1 <=? decl_ci_sys_level ci) && (2 <=? decl_ci_int_level ci) &&
+          (2 <=? decl_ci_rad_level ci) then Stage.IIA
+  else if (1 <=? decl_ci_sys_level ci) && (1 <=? decl_ci_int_level ci) && true
+       then Stage.IB
+  else Stage.IA.
+
+Lemma classify_decl_inputs_faithful : forall c,
+  classify_decl_inputs (extract_decl_ci c) = classify_declarative c.
+Proof.
+  intros c. unfold classify_decl_inputs, extract_decl_ci, classify_declarative,
+    meets_criteria, stage_IIIB_criteria, stage_IIIA_criteria, stage_IIB_criteria,
+    stage_IIA_criteria, stage_IB_criteria, stage_IA_criteria.
+  cbn.
+  reflexivity.
+Qed.
+
+(* Component-wise subset relation. *)
+Definition decl_ci_subset (c1 c2 : ClassifierDeclInputs) : Prop :=
+  decl_ci_sys_level c1 <= decl_ci_sys_level c2 /\
+  decl_ci_int_level c1 <= decl_ci_int_level c2 /\
+  decl_ci_rad_level c1 <= decl_ci_rad_level c2.
+
+(* Monotonicity: increasing any level cannot decrease the resulting stage. *)
+Lemma classify_decl_inputs_monotone : forall c1 c2,
+  decl_ci_subset c1 c2 ->
+  Stage.leb (classify_decl_inputs c1) (classify_decl_inputs c2) = true.
+Proof.
+  intros c1 c2 [Hsys [Hint Hrad]].
+  unfold classify_decl_inputs.
+  destruct (3 <=? decl_ci_rad_level c1) eqn:E1_IIIB.
+  - apply Nat.leb_le in E1_IIIB.
+    assert (E2 : 3 <=? decl_ci_rad_level c2 = true) by (apply Nat.leb_le; lia).
+    rewrite E2. reflexivity.
+  - destruct (3 <=? decl_ci_rad_level c2) eqn:E2_IIIB.
+    + (* c1 < IIIB, c2 = IIIB *)
+      destruct ((3 <=? decl_ci_sys_level c1) && (3 <=? decl_ci_int_level c1) &&
+                (2 <=? decl_ci_rad_level c1));
+      destruct ((2 <=? decl_ci_sys_level c1) && (2 <=? decl_ci_int_level c1) &&
+                (2 <=? decl_ci_rad_level c1));
+      destruct ((1 <=? decl_ci_sys_level c1) && (2 <=? decl_ci_int_level c1) &&
+                (2 <=? decl_ci_rad_level c1));
+      destruct ((1 <=? decl_ci_sys_level c1) && (1 <=? decl_ci_int_level c1) && true);
+      reflexivity.
+    + (* Neither at IIIB *)
+      destruct ((3 <=? decl_ci_sys_level c1) && (3 <=? decl_ci_int_level c1) &&
+                (2 <=? decl_ci_rad_level c1)) eqn:E1_IIIA.
+      * apply andb_true_iff in E1_IIIA. destruct E1_IIIA as [E1a Erad].
+        apply andb_true_iff in E1a. destruct E1a as [Esys Eint].
+        apply Nat.leb_le in Esys, Eint, Erad.
+        assert (S2 : 3 <=? decl_ci_sys_level c2 = true) by (apply Nat.leb_le; lia).
+        assert (I2 : 3 <=? decl_ci_int_level c2 = true) by (apply Nat.leb_le; lia).
+        assert (R2 : 2 <=? decl_ci_rad_level c2 = true) by (apply Nat.leb_le; lia).
+        rewrite S2, I2, R2. reflexivity.
+      * destruct ((3 <=? decl_ci_sys_level c2) && (3 <=? decl_ci_int_level c2) &&
+                  (2 <=? decl_ci_rad_level c2)).
+        { destruct ((2 <=? decl_ci_sys_level c1) && (2 <=? decl_ci_int_level c1) &&
+                    (2 <=? decl_ci_rad_level c1));
+          destruct ((1 <=? decl_ci_sys_level c1) && (2 <=? decl_ci_int_level c1) &&
+                    (2 <=? decl_ci_rad_level c1));
+          destruct ((1 <=? decl_ci_sys_level c1) && (1 <=? decl_ci_int_level c1) && true);
+          reflexivity. }
+        destruct ((2 <=? decl_ci_sys_level c1) && (2 <=? decl_ci_int_level c1) &&
+                  (2 <=? decl_ci_rad_level c1)) eqn:E1_IIB.
+        { apply andb_true_iff in E1_IIB. destruct E1_IIB as [E1a Erad].
+          apply andb_true_iff in E1a. destruct E1a as [Esys Eint].
+          apply Nat.leb_le in Esys, Eint, Erad.
+          assert (S2 : 2 <=? decl_ci_sys_level c2 = true) by (apply Nat.leb_le; lia).
+          assert (I2 : 2 <=? decl_ci_int_level c2 = true) by (apply Nat.leb_le; lia).
+          assert (R2 : 2 <=? decl_ci_rad_level c2 = true) by (apply Nat.leb_le; lia).
+          rewrite S2, I2, R2. simpl. reflexivity. }
+        destruct ((2 <=? decl_ci_sys_level c2) && (2 <=? decl_ci_int_level c2) &&
+                  (2 <=? decl_ci_rad_level c2)).
+        { destruct ((1 <=? decl_ci_sys_level c1) && (2 <=? decl_ci_int_level c1) &&
+                    (2 <=? decl_ci_rad_level c1));
+          destruct ((1 <=? decl_ci_sys_level c1) && (1 <=? decl_ci_int_level c1) && true);
+          reflexivity. }
+        destruct ((1 <=? decl_ci_sys_level c1) && (2 <=? decl_ci_int_level c1) &&
+                  (2 <=? decl_ci_rad_level c1)) eqn:E1_IIA.
+        { apply andb_true_iff in E1_IIA. destruct E1_IIA as [E1a Erad].
+          apply andb_true_iff in E1a. destruct E1a as [Esys Eint].
+          apply Nat.leb_le in Esys, Eint, Erad.
+          assert (S2 : 1 <=? decl_ci_sys_level c2 = true) by (apply Nat.leb_le; lia).
+          assert (I2 : 2 <=? decl_ci_int_level c2 = true) by (apply Nat.leb_le; lia).
+          assert (R2 : 2 <=? decl_ci_rad_level c2 = true) by (apply Nat.leb_le; lia).
+          rewrite S2, I2, R2. simpl. reflexivity. }
+        destruct ((1 <=? decl_ci_sys_level c2) && (2 <=? decl_ci_int_level c2) &&
+                  (2 <=? decl_ci_rad_level c2)).
+        { destruct ((1 <=? decl_ci_sys_level c1) && (1 <=? decl_ci_int_level c1) && true);
+          reflexivity. }
+        destruct ((1 <=? decl_ci_sys_level c1) && (1 <=? decl_ci_int_level c1) && true) eqn:E1_IB.
+        { apply andb_true_iff in E1_IB. destruct E1_IB as [E1a _].
+          apply andb_true_iff in E1a. destruct E1a as [Esys Eint].
+          apply Nat.leb_le in Esys, Eint.
+          assert (S2 : 1 <=? decl_ci_sys_level c2 = true) by (apply Nat.leb_le; lia).
+          assert (I2 : 1 <=? decl_ci_int_level c2 = true) by (apply Nat.leb_le; lia).
+          rewrite S2, I2. simpl. reflexivity. }
+        destruct ((1 <=? decl_ci_sys_level c2) && (1 <=? decl_ci_int_level c2) && true);
+        reflexivity.
+Qed.
+
+(* Synthesis classifier: conservative join of procedural and declarative
+   readings. Returns the higher of the two stages, dominating both
+   classifiers. Useful when callers want maximum sensitivity over the
+   principled disagreement region. *)
+Definition classify_synthesis (c : ClinicalState.t) : Stage.t :=
+  let s_proc := Classification.classify c in
+  let s_decl := classify_declarative c in
+  if Stage.leb s_proc s_decl then s_decl else s_proc.
+
+Lemma classify_synthesis_dominates_proc : forall c,
+  Stage.leb (Classification.classify c) (classify_synthesis c) = true.
+Proof.
+  intros c. unfold classify_synthesis.
+  destruct (Stage.leb (Classification.classify c) (classify_declarative c)) eqn:E.
+  - exact E.
+  - unfold Stage.leb. apply Nat.leb_le. lia.
+Qed.
+
+Lemma classify_synthesis_dominates_decl : forall c,
+  Stage.leb (classify_declarative c) (classify_synthesis c) = true.
+Proof.
+  intros c. unfold classify_synthesis.
+  destruct (Stage.leb (Classification.classify c) (classify_declarative c)) eqn:E.
+  - unfold Stage.leb. apply Nat.leb_refl.
+  - unfold Stage.leb in *. apply Nat.leb_gt in E. apply Nat.leb_le. lia.
+Qed.
+
+Lemma classify_synthesis_preserves_IIIB : forall c,
+  RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = true ->
+  classify_synthesis c = Stage.IIIB.
+Proof.
+  intros c H. unfold classify_synthesis.
+  rewrite (Classification.pneumoperitoneum_forces_IIIB c H).
+  rewrite (classify_declarative_IIIB_on_perf c H).
+  reflexivity.
+Qed.
+
+Theorem classify_declarative_independent_of_micro : forall c m,
+  classify_declarative c =
+  classify_declarative
+    (ClinicalState.MkClinicalState
+      (ClinicalState.risk_factors c) (ClinicalState.labs c)
+      (ClinicalState.coag c) m
+      (ClinicalState.vitals c) (ClinicalState.systemic c)
+      (ClinicalState.intestinal c) (ClinicalState.radiographic c)
+      (ClinicalState.neuro_status c) (ClinicalState.hours_since_symptom_onset c)
+      (ClinicalState.systemic_assessed_h c)
+      (ClinicalState.intestinal_assessed_h c)
+      (ClinicalState.radiographic_assessed_h c)).
+Proof.
+  intros c m. unfold classify_declarative, meets_criteria,
+    compute_systemic_level, compute_intestinal_level,
+    compute_radiographic_level.
+  destruct c; reflexivity.
+Qed.
+
 End BellCriteria.

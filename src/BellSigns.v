@@ -476,6 +476,46 @@ Definition age_adjusted_diagnosis (f : DifferentialFeatures)
   | _ => base
   end.
 
+(* Bidirectional age-adjustment: the symmetric pair to age_adjusted_diagnosis.
+   In addition to demoting NEC outside the peak window to FeedingIntolerance,
+   this entry escalates ambiguous FeedingIntolerance to NEC when the patient
+   is in the peak NEC PMA window (29-33 wk) AND has a NEC-suggestive feature
+   (pneumatosis, PVG, or feeding intolerance history). *)
+Definition age_adjusted_diagnosis_bidir (f : DifferentialFeatures)
+    (ga_weeks day_of_life : nat) : GIDifferential :=
+  let base := age_adjusted_diagnosis f ga_weeks day_of_life in
+  let nec_adj := age_adjusted_nec_likelihood ga_weeks day_of_life in
+  match base with
+  | FeedingIntolerance =>
+      if (age_adjust_demotion <=? nec_adj) && suggests_nec f
+      then NEC
+      else FeedingIntolerance
+  | _ => base
+  end.
+
+(* Bidirectional preserves age_adjusted's NEC verdict in-window. *)
+Lemma age_adjusted_bidir_preserves_nec : forall f ga dol,
+  age_adjusted_diagnosis f ga dol = NEC ->
+  age_adjusted_diagnosis_bidir f ga dol = NEC.
+Proof.
+  intros f ga dol Hbase. unfold age_adjusted_diagnosis_bidir.
+  rewrite Hbase. reflexivity.
+Qed.
+
+(* Escalates FeedingIntolerance when in-window with NEC-suggestive features. *)
+Lemma age_adjusted_bidir_escalates_in_window : forall f ga dol,
+  age_adjusted_diagnosis f ga dol = FeedingIntolerance ->
+  age_adjust_demotion <= age_adjusted_nec_likelihood ga dol ->
+  suggests_nec f = true ->
+  age_adjusted_diagnosis_bidir f ga dol = NEC.
+Proof.
+  intros f ga dol Hbase Hge Hsugg.
+  unfold age_adjusted_diagnosis_bidir. rewrite Hbase.
+  destruct (age_adjust_demotion <=? age_adjusted_nec_likelihood ga dol) eqn:E.
+  - rewrite Hsugg. reflexivity.
+  - apply Nat.leb_gt in E. lia.
+Qed.
+
 (* Contract: if the base diagnosis is NEC and the age-adjusted NEC likelihood
    meets the demotion threshold, the age-adjusted diagnosis preserves NEC. *)
 Lemma age_adjusted_preserves_nec : forall f ga dol,

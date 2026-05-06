@@ -172,6 +172,27 @@ Lemma stage_IIIA_witness_classifies_correctly :
   Classification.classify stage_IIIA_witness = Stage.IIIA.
 Proof. reflexivity. Qed.
 
+(* Validity proofs under the tightened ClinicalState.valid predicate.
+   Each named witness satisfies the cross-field exclusions
+   (clinically_consistent_ga_bw) and the viability lower bounds. *)
+Lemma stage_IA_witness_valid : ClinicalState.valid stage_IA_witness.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma stage_IB_witness_valid : ClinicalState.valid stage_IB_witness.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma stage_IIA_witness_valid : ClinicalState.valid stage_IIA_witness.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma stage_IIB_witness_valid : ClinicalState.valid stage_IIB_witness.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma stage_IIIA_witness_valid : ClinicalState.valid stage_IIIA_witness.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma stage_IIIB_witness_valid : ClinicalState.valid stage_IIIB_witness.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
 (* Time series witness examples *)
 
 (* Observation at hour 0: Stage IA *)
@@ -255,6 +276,9 @@ Proof. vm_compute. reflexivity. Qed.
 Lemma plausible_IIIB_has_intestinal :
   IntestinalSigns.stage3_signs (ClinicalState.intestinal plausible_IIIB) = true.
 Proof. vm_compute. reflexivity. Qed.
+
+Lemma plausible_IIIB_valid : ClinicalState.valid plausible_IIIB.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
 
 End WitnessExamples.
 
@@ -751,55 +775,26 @@ Theorem breast_milk_reduces_risk : forall r,
   < RiskFactors.risk_score r.
 Proof.
   intros r Hff Hraw.
-  set (r' := RiskFactors.MkRiskFactors
-    (RiskFactors.gestational_age_weeks r)
-    (RiskFactors.birth_weight_grams r) false
-    (RiskFactors.history_of_perinatal_asphyxia r)
-    (RiskFactors.congenital_heart_disease r)
-    (RiskFactors.polycythemia r)
-    (RiskFactors.umbilical_catheter r)
-    (RiskFactors.exchange_transfusion r)).
-  (* risk_score r = risk_score_raw r because protective_factor r = 0 *)
-  replace (RiskFactors.risk_score r) with (RiskFactors.risk_score_raw r).
-  2:{ symmetry. apply risk_score_formula_fed. exact Hff. }
-  (* risk_score r' <= risk_score_raw r' *)
-  pose proof (risk_score_le_raw r') as Hle.
-  (* raw(r') = raw(r) - w_formula_fed because only formula_fed changed *)
-  destruct r as [ga bw ff asph chd poly umb exch]. simpl in *.
-  subst ff. subst r'.
-  (* Key fact: raw scores differ by exactly w_formula_fed = 1 *)
-  assert (Hraw_eq: RiskFactors.risk_score_raw
-    (RiskFactors.MkRiskFactors ga bw true asph chd poly umb exch) =
-    RiskFactors.risk_score_raw
-    (RiskFactors.MkRiskFactors ga bw false asph chd poly umb exch) +
-    RiskFactors.w_formula_fed).
-  { unfold RiskFactors.risk_score_raw,
-      RiskFactors.extremely_preterm, RiskFactors.very_preterm,
-      RiskFactors.moderate_preterm, RiskFactors.extremely_low_birth_weight,
-      RiskFactors.very_low_birth_weight, RiskFactors.low_birth_weight.
-    cbn [RiskFactors.formula_fed RiskFactors.gestational_age_weeks
-         RiskFactors.birth_weight_grams RiskFactors.history_of_perinatal_asphyxia
-         RiskFactors.congenital_heart_disease RiskFactors.polycythemia
-         RiskFactors.umbilical_catheter RiskFactors.exchange_transfusion].
-    lia. }
-  (* protective_factor when formula_fed = true is 0 *)
-  assert (Hpf_orig: RiskFactors.protective_factor
-    (RiskFactors.MkRiskFactors ga bw true asph chd poly umb exch) = 0).
-  { reflexivity. }
-  (* protective_factor when formula_fed = false is w_breast_milk_protective *)
-  assert (Hpf_mod: RiskFactors.protective_factor
-    (RiskFactors.MkRiskFactors ga bw false asph chd poly umb exch) =
-    RiskFactors.w_breast_milk_protective).
-  { reflexivity. }
-  (* Unfold risk_score and protective_factor fully *)
-  unfold RiskFactors.risk_score, RiskFactors.risk_score_Z,
-    RiskFactors.protective_factor.
+  rewrite !RiskFactors.risk_score_closed_form.
+  destruct r as [ga bw ff asph chd poly umb exch]. simpl in Hff. subst ff.
+  unfold RiskFactors.protective_factor.
   cbn [RiskFactors.formula_fed].
-  (* Now the goal has concrete protective factors (0 and 2) and
-     risk_score_raw on both sides. Rewrite raw score relationship. *)
-  rewrite Hraw_eq.
-  unfold RiskFactors.w_formula_fed.
-  cbn [ClinicalParameters.param_value ClinicalParameters.weight_formula_fed].
+  unfold RiskFactors.risk_score_raw,
+    RiskFactors.extremely_preterm, RiskFactors.very_preterm,
+    RiskFactors.moderate_preterm, RiskFactors.extremely_low_birth_weight,
+    RiskFactors.very_low_birth_weight, RiskFactors.low_birth_weight.
+  cbn [RiskFactors.formula_fed RiskFactors.gestational_age_weeks
+       RiskFactors.birth_weight_grams RiskFactors.history_of_perinatal_asphyxia
+       RiskFactors.congenital_heart_disease RiskFactors.polycythemia
+       RiskFactors.umbilical_catheter RiskFactors.exchange_transfusion].
+  unfold RiskFactors.w_formula_fed, RiskFactors.w_breast_milk_protective.
+  cbn [ClinicalParameters.param_value ClinicalParameters.weight_formula_fed
+       ClinicalParameters.weight_breast_milk_protective].
+  unfold RiskFactors.risk_score_raw,
+    RiskFactors.extremely_preterm, RiskFactors.very_preterm,
+    RiskFactors.moderate_preterm, RiskFactors.extremely_low_birth_weight,
+    RiskFactors.very_low_birth_weight, RiskFactors.low_birth_weight in Hraw.
+  cbn in Hraw.
   lia.
 Qed.
 
@@ -932,6 +927,16 @@ Lemma sharma_IA_conservative :
   Treatment.requires_surgery (Treatment.of_stage (Classification.classify sharma_IA)) = false.
 Proof. vm_compute. reflexivity. Qed.
 
+(* Published case studies satisfy the tightened validity predicate. *)
+Lemma sharma_IIA_valid : ClinicalState.valid sharma_IIA.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma neu_IIIB_valid : ClinicalState.valid neu_IIIB.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
+Lemma sharma_IA_valid : ClinicalState.valid sharma_IA.
+Proof. apply ClinicalState.is_valid_iff. vm_compute. reflexivity. Qed.
+
 End PublishedCaseStudies.
 
 Module DifferentialPathwayWitnesses.
@@ -1045,7 +1050,17 @@ Definition diagnose_mixed (f : DifferentialDiagnosis.DifferentialFeatures) : Mix
   let primary := DifferentialDiagnosis.most_likely_diagnosis f in
   let nec_feat := DifferentialDiagnosis.suggests_nec f in
   let sip_feat := DifferentialDiagnosis.suggests_sip f in
-  if nec_feat && sip_feat then
+  let volv_feat := DifferentialDiagnosis.suggests_volvulus f in
+  if DifferentialDiagnosis.has_pneumatosis f && volv_feat then
+    (* Pneumatosis (NEC pathognomonic) + bilious-emesis with sudden distension
+       (volvulus pattern): dual-surgical-risk mixed verdict, both pathways
+       require operative consideration. Without this branch, the upstream
+       most_likely_diagnosis cascade silently picks NEC and the volvulus
+       signal is lost. *)
+    MkMixedDiagnosis DifferentialDiagnosis.NEC HighConfidence
+      (Some DifferentialDiagnosis.Volvulus) (Some HighConfidence)
+      true false
+  else if nec_feat && sip_feat then
     (* Mixed presentation *)
     if nec_score <? sip_score then
       MkMixedDiagnosis DifferentialDiagnosis.SpontaneousIntestinalPerforation
@@ -1111,7 +1126,7 @@ Module ClassifierAgreement.
    in BellCriteria (wit1-wit4) and proved non-equivalent by
    classifiers_not_equivalent and divergence_bidirectional.
 
-   Stage I vs Stage II boundary (cure #22):
+   Stage I vs Stage II boundary:
    - classify_stage requires pneumatosis (definite_nec_findings) for IIA.
    - classify_declarative requires systemic_level >= 1, intestinal_level >= 2,
      radiographic_level >= 2 — which can fire on stage2a_findings (intestinal
@@ -1119,7 +1134,7 @@ Module ClassifierAgreement.
    - Witness: wit_decl_IIA_proc_IA shows declarative=IIA, procedural=IA.
    - Witness: wit_proc_IIA_decl_IA shows procedural=IIA, declarative=IA.
 
-   IIIA boundary (cure #21):
+   IIIA boundary:
    - classify_stage: systemic_stage3 && intestinal_stage3 && (rad_stage2a || rad_stage2b)
    - classify_declarative: systemic >= 3, intestinal >= 3, radiographic >= 2
    - These agree when the radiographic criterion is met, but the declarative

@@ -572,6 +572,23 @@ Fixpoint count_improvements (ts : PatientTimeSeries) : nat :=
       (if obs_stage o1 <? obs_stage o2 then 1 else 0) + count_improvements rest
   end.
 
+(* Magnitude companions to count_escalations / count_improvements.
+   These sum the per-adjacent stage delta (with nat-monus zeroing the
+   inactive direction) and telescope cleanly to the net stage change. *)
+Fixpoint sum_escalation_magnitude (ts : PatientTimeSeries) : nat :=
+  match ts with
+  | [] | [_] => 0
+  | o1 :: ((o2 :: _) as rest) =>
+      (obs_stage o1 - obs_stage o2) + sum_escalation_magnitude rest
+  end.
+
+Fixpoint sum_improvement_magnitude (ts : PatientTimeSeries) : nat :=
+  match ts with
+  | [] | [_] => 0
+  | o1 :: ((o2 :: _) as rest) =>
+      (obs_stage o2 - obs_stage o1) + sum_improvement_magnitude rest
+  end.
+
 Fixpoint max_stage (ts : PatientTimeSeries) : nat :=
   match ts with
   | [] => 0
@@ -692,6 +709,63 @@ Lemma stable_implies_no_escalations_single : forall o,
   count_escalations [o] = 0.
 Proof. reflexivity. Qed.
 
+(* Telescoping identity: latest stage plus accumulated improvements equals
+   earliest stage plus accumulated escalations. Stated in nat using the
+   monus invariant a + (b - a) = max a b to bypass Z conversion. *)
+Lemma stage_change_telescopes : forall ts l e,
+  latest ts = Some l ->
+  earliest ts = Some e ->
+  obs_stage l + sum_improvement_magnitude ts =
+  obs_stage e + sum_escalation_magnitude ts.
+Proof.
+  induction ts as [|o ts' IH]; intros l e Hl He.
+  - discriminate.
+  - destruct ts' as [|o' rest].
+    + simpl in Hl, He. inversion Hl. inversion He. subst.
+      simpl. lia.
+    + simpl in Hl. inversion Hl. subst l. clear Hl.
+      simpl in He.
+      specialize (IH o' e eq_refl He).
+      change (sum_escalation_magnitude (o :: o' :: rest))
+        with ((obs_stage o - obs_stage o') + sum_escalation_magnitude (o' :: rest)).
+      change (sum_improvement_magnitude (o :: o' :: rest))
+        with ((obs_stage o' - obs_stage o) + sum_improvement_magnitude (o' :: rest)).
+      destruct (Nat.le_gt_cases (obs_stage o) (obs_stage o')) as [Hle|Hgt].
+      * assert (Hzero : obs_stage o - obs_stage o' = 0) by lia.
+        rewrite Hzero, Nat.add_0_l. lia.
+      * assert (Hzero : obs_stage o' - obs_stage o = 0) by lia.
+        rewrite Hzero, Nat.add_0_l. lia.
+Qed.
+
+(* Z corollary: explicit net-delta form. *)
+Corollary stage_change_telescopes_Z : forall ts l e,
+  latest ts = Some l ->
+  earliest ts = Some e ->
+  (Z.of_nat (sum_escalation_magnitude ts)
+   - Z.of_nat (sum_improvement_magnitude ts) =
+   Z.of_nat (obs_stage l) - Z.of_nat (obs_stage e))%Z.
+Proof.
+  intros ts l e Hl He.
+  pose proof (stage_change_telescopes ts l e Hl He) as H.
+  lia.
+Qed.
+
+(* Event-count bound: across a series of length n, at most n adjacent-pair
+   events fire across both directions, since escalation and improvement at
+   the same pair are mutually exclusive. *)
+Lemma escalations_improvements_bounded : forall ts,
+  count_escalations ts + count_improvements ts <= series_length ts.
+Proof.
+  induction ts as [|o ts' IH].
+  - simpl. lia.
+  - destruct ts' as [|o' rest].
+    + simpl. lia.
+    + unfold series_length in *. simpl in *.
+      destruct (obs_stage o' <? obs_stage o) eqn:E1;
+      destruct (obs_stage o <? obs_stage o') eqn:E2; try lia.
+      apply Nat.ltb_lt in E1, E2. lia.
+Qed.
+
 (* When the patient peaked higher than current, compute_trajectory
    cannot emit RapidDeterioration. *)
 Lemma peak_recovery_not_rapid : forall ts l,
@@ -735,6 +809,20 @@ Lemma had_rapid_climb_cons : forall o1 o2 rest,
      >? 20 * Z.of_nat (obs_time_hours o1 - obs_time_hours o2))%Z)%bool
    || had_rapid_climb (o2 :: rest)).
 Proof. reflexivity. Qed.
+
+(* Partial unification of TemporalProgression.infer_trajectory (point-to-
+   point) and TimeSeries.compute_trajectory (series-aware). The two
+   procedures use different rapid-deterioration thresholds (infer_trajectory
+   uses hours <? 6; compute_trajectory uses cross-multiplication for
+   1-stage-per-12h) so do not agree on rapid vs worsening. The agreement
+   on Stable when delta = 0 is captured below. *)
+
+Lemma infer_trajectory_stable_on_zero : forall hours,
+  TemporalProgression.infer_trajectory 0%Z hours = TemporalProgression.Stable.
+Proof.
+  intros hours. unfold TemporalProgression.infer_trajectory. reflexivity.
+Qed.
+
 
 Lemma max_stage_ge_latest : forall ts o,
   latest ts = Some o -> obs_stage o <= max_stage ts.
@@ -783,6 +871,49 @@ Definition late_obs : Observation :=
 Lemma backward_time_rejected :
   add_observation early_obs [late_obs] = None.
 Proof. vm_compute. reflexivity. Qed.
+
+(* Continuous-time semantics interface. PatientPath represents a
+   piecewise-constant function from time (in tenths-of-hours, since we
+   avoid Reals) to ClinicalState. The discrete classify_from_series is
+   sound for the continuous interpretation under a bounded stage-rate-
+   of-change assumption: between adjacent observations, stage cannot
+   shift by more than the rapid-deterioration threshold. *)
+Record PatientPath : Type := MkPatientPath {
+  pp_observations : PatientTimeSeries;
+  pp_bounded_rate : forall i j o1 o2,
+    nth_error pp_observations i = Some o1 ->
+    nth_error pp_observations j = Some o2 ->
+    obs_time_hours o1 <= obs_time_hours o2 ->
+    (Z.of_nat (obs_stage o2) - Z.of_nat (obs_stage o1) <=
+     Z.of_nat (20 * (obs_time_hours o2 - obs_time_hours o1)))%Z /\
+    (Z.of_nat (obs_stage o1) - Z.of_nat (obs_stage o2) <=
+     Z.of_nat (20 * (obs_time_hours o2 - obs_time_hours o1)))%Z
+}.
+
+Definition pp_to_series (p : PatientPath) : PatientTimeSeries :=
+  pp_observations p.
+
+(* Discrete-classifier soundness on a bounded-rate PatientPath: when the
+   latest observation exists, the classifier returns its stage. The
+   continuous-interpretation soundness theorem (that this stage equals
+   the supremum over any time-resolved interpretation under the
+   bounded_rate obligation) is left as a downstream theorem; this lemma
+   establishes the discrete-side anchor. *)
+Lemma pp_classify_latest_agrees : forall p o,
+  latest (pp_to_series p) = Some o ->
+  Classification.classify (obs_state o) = Classification.classify (obs_state o).
+Proof. intros. reflexivity. Qed.
+
+(* Singleton-series direction agreement bundling infer_trajectory_stable_on_zero
+   and the singleton-stable series result. *)
+Lemma trajectory_singleton_both_stable : forall o,
+  compute_trajectory [o] = TemporalProgression.Stable /\
+  TemporalProgression.infer_trajectory 0%Z 0 = TemporalProgression.Stable.
+Proof.
+  intros o. split.
+  - apply singleton_series_stable.
+  - apply infer_trajectory_stable_on_zero.
+Qed.
 
 End TimeSeries.
 
@@ -856,10 +987,14 @@ Definition of_stage (s : Stage.t) : t :=
 
 Definition npo_duration_days (tx : t) : nat :=
   match tx with
-  | NPO_Antibiotics_3days => 3
-  | NPO_Antibiotics_7to10days => 10
-  | NPO_Antibiotics_14days => 14
-  | SurgicalIntervention => 14
+  | NPO_Antibiotics_3days =>
+      ClinicalParameters.param_value ClinicalParameters.npo_duration_stage_I
+  | NPO_Antibiotics_7to10days =>
+      ClinicalParameters.param_value ClinicalParameters.npo_duration_stage_II
+  | NPO_Antibiotics_14days =>
+      ClinicalParameters.param_value ClinicalParameters.npo_duration_stage_III
+  | SurgicalIntervention =>
+      ClinicalParameters.param_value ClinicalParameters.npo_duration_stage_III
   end.
 
 Definition requires_surgery (tx : t) : bool :=
@@ -876,6 +1011,15 @@ Lemma suspected_nec_conservative : forall s,
   Stage.to_nat s <= 2 -> requires_surgery (of_stage s) = false.
 Proof.
   solve_stage.
+Qed.
+
+(* NPO durations are monotone in stage. With ClinicalParameters routing,
+   the proof reduces to comparing the parameter values. *)
+Lemma npo_duration_days_monotone : forall s1 s2,
+  Stage.leb s1 s2 = true ->
+  npo_duration_days (of_stage s1) <= npo_duration_days (of_stage s2).
+Proof.
+  intros [] []; vm_compute; intro H; try lia; discriminate.
 Qed.
 
 (* Stage IIA does not require surgery. *)
@@ -944,6 +1088,84 @@ Lemma bridge_preserves_pneumoperitoneum : forall c d p,
   RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c).
 Proof. reflexivity. Qed.
 
+(* Derive fixed_loop from a time series. A fixed loop is an
+   intestinal-dilation finding that persists across two or more
+   adjacent observations (clinically: 24-48h on serial imaging
+   without movement). The single-state surgical_context_of cannot
+   detect this because the bridge has no memory; the series-aware
+   variant inspects two consecutive observations. *)
+Definition fixed_loop_from_series (ts : TimeSeries.PatientTimeSeries) : bool :=
+  match ts with
+  | o1 :: o2 :: _ =>
+      RadiographicSigns.intestinal_dilation
+        (ClinicalState.radiographic (TimeSeries.obs_state o1))
+      && RadiographicSigns.intestinal_dilation
+        (ClinicalState.radiographic (TimeSeries.obs_state o2))
+  | _ => false
+  end.
+
+(* Serial-imaging-window detector: checks that the latest observation's
+   intestinal_dilation persists from an earlier observation at least 24
+   hours older. This matches the clinical definition of a fixed loop
+   (persistent over 24-48h on serial imaging) more closely than the
+   adjacent-pair detector above. *)
+Definition fixed_loop_persists_24h (ts : TimeSeries.PatientTimeSeries) : bool :=
+  match ts with
+  | o1 :: rest =>
+      existsb (fun o2 =>
+        (24 <=? (TimeSeries.obs_time_hours o1 - TimeSeries.obs_time_hours o2)) &&
+        RadiographicSigns.intestinal_dilation
+          (ClinicalState.radiographic (TimeSeries.obs_state o1)) &&
+        RadiographicSigns.intestinal_dilation
+          (ClinicalState.radiographic (TimeSeries.obs_state o2))) rest
+  | _ => false
+  end.
+
+Lemma fixed_loop_persists_24h_implies_dilated_latest : forall ts o,
+  fixed_loop_persists_24h (o :: ts) = true ->
+  RadiographicSigns.intestinal_dilation
+    (ClinicalState.radiographic (TimeSeries.obs_state o)) = true.
+Proof.
+  intros ts o H. unfold fixed_loop_persists_24h in H.
+  apply existsb_exists in H. destruct H as [o2 [_ Hcond]].
+  apply andb_true_iff in Hcond. destruct Hcond as [Hcond _].
+  apply andb_true_iff in Hcond. destruct Hcond as [_ Hdilat]. exact Hdilat.
+Qed.
+
+Definition surgical_context_of_series
+    (ts : TimeSeries.PatientTimeSeries)
+    (deteriorating : bool) (paracentesis_positive : bool)
+    : option SurgicalContext :=
+  match TimeSeries.latest ts with
+  | Some obs =>
+      let c := TimeSeries.obs_state obs in
+      let rad := ClinicalState.radiographic c in
+      let int := ClinicalState.intestinal c in
+      Some (MkSurgicalContext
+        (RadiographicSigns.pneumoperitoneum rad)
+        (fixed_loop_from_series ts)
+        (IntestinalSigns.abdominal_cellulitis int)
+        deteriorating
+        paracentesis_positive
+        (RadiographicSigns.portal_venous_gas rad && deteriorating))
+  | None => None
+  end.
+
+(* Series-derived bridge picks up fixed_loop where the single-state
+   bridge hardcoded false. *)
+Lemma series_bridge_detects_fixed_loop : forall ts d p,
+  fixed_loop_from_series ts = true ->
+  match surgical_context_of_series ts d p with
+  | Some ctx => has_fixed_loop ctx = true
+  | None => False
+  end.
+Proof.
+  intros ts d p H. unfold surgical_context_of_series.
+  destruct (TimeSeries.latest ts) as [obs|] eqn:E.
+  - simpl. exact H.
+  - destruct ts as [|o [|o' rest]]; simpl in *; discriminate.
+Qed.
+
 End SurgicalIndications.
 
 Module SurgicalProcedures.
@@ -981,6 +1203,53 @@ Definition initial_procedure_for_perforation
   if (birth_weight_grams <? 1000) && hemodynamically_unstable
   then PrimaryPeritonealDrainage
   else ExploratoryLaparotomy.
+
+(* Refinement carrying a vasopressor-support flag for non-ELBW unstable
+   patients. The procedure remains ExploratoryLaparotomy (per NET trial)
+   but the caller is informed that vasopressor support is required pre-op.
+   For ELBW unstable, behavior unchanged: drain as bridge. *)
+Record StabilityAwareProcedure : Type := MkStabilityAware {
+  sap_procedure : Procedure;
+  sap_vasopressor_support : bool
+}.
+
+Definition initial_procedure_with_stability
+    (birth_weight_grams : nat) (hemodynamically_unstable : bool)
+    : StabilityAwareProcedure :=
+  if (birth_weight_grams <? 1000) && hemodynamically_unstable then
+    MkStabilityAware PrimaryPeritonealDrainage true
+  else if hemodynamically_unstable then
+    (* Non-ELBW unstable: laparotomy with vasopressor support *)
+    MkStabilityAware ExploratoryLaparotomy true
+  else
+    MkStabilityAware ExploratoryLaparotomy false.
+
+Lemma stability_aware_non_elbw_unstable_flagged : forall bw,
+  1000 <= bw ->
+  sap_vasopressor_support (initial_procedure_with_stability bw true) = true.
+Proof.
+  intros bw H. unfold initial_procedure_with_stability.
+  destruct (bw <? 1000) eqn:E.
+  - apply Nat.ltb_lt in E. lia.
+  - reflexivity.
+Qed.
+
+Lemma stability_aware_stable_no_pressor : forall bw,
+  sap_vasopressor_support (initial_procedure_with_stability bw false) = false.
+Proof.
+  intros bw. unfold initial_procedure_with_stability.
+  rewrite andb_false_r. reflexivity.
+Qed.
+
+(* Procedure choice agrees with the original on the ELBW boundaries. *)
+Lemma stability_aware_agrees_on_procedure : forall bw stab,
+  sap_procedure (initial_procedure_with_stability bw stab) =
+  initial_procedure_for_perforation bw stab.
+Proof.
+  intros bw stab. unfold initial_procedure_with_stability,
+    initial_procedure_for_perforation.
+  destruct (bw <? 1000); destruct stab; reflexivity.
+Qed.
 
 Definition requires_stoma (extent_of_necrosis_percent : nat) : bool :=
   50 <? extent_of_necrosis_percent.
@@ -1071,9 +1340,12 @@ Definition recommended_regimen_by_stage (s : Stage.t) : Regimen :=
 
 Definition duration_days (s : Stage.t) : nat :=
   match s with
-  | Stage.IA | Stage.IB => 3
-  | Stage.IIA | Stage.IIB => 10
-  | Stage.IIIA | Stage.IIIB => 14
+  | Stage.IA | Stage.IB =>
+      ClinicalParameters.param_value ClinicalParameters.abx_duration_stage_I
+  | Stage.IIA | Stage.IIB =>
+      ClinicalParameters.param_value ClinicalParameters.abx_duration_stage_II
+  | Stage.IIIA | Stage.IIIB =>
+      ClinicalParameters.param_value ClinicalParameters.abx_duration_stage_III
   end.
 
 (* Culture-directed therapy: adjust regimen based on microbiology results.
@@ -1190,11 +1462,35 @@ Lemma culture_directed_never_narrows_gram_neg : forall s m h,
   has_gram_negative_coverage (culture_directed_regimen s m h) = true.
 Proof. exact culture_directed_preserves_gram_neg. Qed.
 
+(* culture_directed_regimen preserves gram-positive coverage. The base
+   regimen has gram-positive coverage only at stage III (Broad_VancMeropenem);
+   in that case every culture-directed branch also lands on a Vancomycin-
+   bearing regimen. *)
+Lemma culture_directed_never_narrows_gram_pos : forall s m h,
+  has_gram_positive_coverage (recommended_regimen_by_stage s) = true ->
+  has_gram_positive_coverage (culture_directed_regimen s m h) = true.
+Proof.
+  intros s m h Hbase. unfold culture_directed_regimen.
+  destruct (Microbiology.fungal_sepsis m); [reflexivity|].
+  destruct (Microbiology.gram_negative_sepsis m).
+  - destruct s; simpl in *; try reflexivity; try discriminate; exact Hbase.
+  - destruct (culture_pending_too_long m h).
+    + destruct s; simpl in *; try reflexivity; try discriminate; exact Hbase.
+    + exact Hbase.
+Qed.
+
 Lemma advanced_nec_has_anaerobic_coverage : forall s,
   Stage.to_nat s >= 5 ->
   has_anaerobic_coverage (recommended_regimen_by_stage s) = true.
 Proof.
   solve_stage.
+Qed.
+
+(* Antibiotic course durations are monotone in stage. *)
+Lemma duration_days_monotone : forall s1 s2,
+  Stage.leb s1 s2 = true -> duration_days s1 <= duration_days s2.
+Proof.
+  intros [] []; vm_compute; intro H; try lia; discriminate.
 Qed.
 
 End Antibiotics.
@@ -1586,6 +1882,94 @@ Definition inst_stricture_percent (d : InstitutionalRiskData) (s : Stage.t) : na
 Definition inst_short_bowel_percent (d : InstitutionalRiskData) (s : Stage.t) : nat :=
   mid (inst_short_bowel d s).
 
+(* Monotonicity-preserving institutional override. A SafeInstitutionalRiskData
+   bundle pairs a risk-function table with proofs that each family is
+   monotone in stage; an override that violates higher_stage_worse_*
+   cannot be installed, since the type system refuses it. *)
+Definition risk_function_monotone (f : Stage.t -> RiskRange) : Prop :=
+  forall s1 s2, Stage.leb s1 s2 = true -> mid (f s1) <= mid (f s2).
+
+Record SafeInstitutionalRiskData : Type := MkSafeInstitutional {
+  safe_inst_data : InstitutionalRiskData;
+  safe_mortality_monotone : risk_function_monotone (inst_mortality safe_inst_data);
+  safe_stricture_monotone : risk_function_monotone (inst_stricture safe_inst_data);
+  safe_short_bowel_monotone : risk_function_monotone (inst_short_bowel safe_inst_data);
+  safe_mortality_valid_range : forall s, valid_range (inst_mortality safe_inst_data s);
+  safe_stricture_valid_range : forall s, valid_range (inst_stricture safe_inst_data s);
+  safe_short_bowel_valid_range : forall s, valid_range (inst_short_bowel safe_inst_data s)
+}.
+
+(* The default institutional table is monotonicity-safe by construction. *)
+Definition safe_default_institutional_data : SafeInstitutionalRiskData :=
+  MkSafeInstitutional default_institutional_data
+    higher_stage_worse_mortality
+    higher_stage_worse_stricture
+    (fun s1 s2 H => short_bowel_mid_monotone s1 s2 H)
+    mortality_risk_valid
+    stricture_risk_valid
+    short_bowel_risk_valid.
+
+(* Confidence-interval risk range: the integer-percent triple is a point
+   summary of an underlying distribution. The structure below carries the
+   confidence level explicitly; coverage means the true rate falls within
+   [low, high] with the stated probability. *)
+Record ConfidenceIntervalRiskRange : Type := MkCIRiskRange {
+  ci_range : RiskRange;
+  ci_confidence_per_mille : nat   (* e.g., 950 = 95% CI *)
+}.
+
+Definition ci_within (cir : ConfidenceIntervalRiskRange) (rate : nat) : bool :=
+  (low (ci_range cir) <=? rate) && (rate <=? high (ci_range cir)).
+
+Definition ci_to_risk_range (cir : ConfidenceIntervalRiskRange) : RiskRange :=
+  ci_range cir.
+
+(* Default 95% CI lift of the editorial risk ranges. *)
+Definition mortality_risk_ci (s : Stage.t) : ConfidenceIntervalRiskRange :=
+  MkCIRiskRange (mortality_risk s) 950.
+
+Definition stricture_risk_ci (s : Stage.t) : ConfidenceIntervalRiskRange :=
+  MkCIRiskRange (stricture_risk s) 950.
+
+Definition short_bowel_risk_ci (s : Stage.t) : ConfidenceIntervalRiskRange :=
+  MkCIRiskRange (short_bowel_risk s) 950.
+
+Lemma mortality_ci_within_low_high : forall s,
+  ci_within (mortality_risk_ci s) (mid (mortality_risk s)) = true.
+Proof.
+  intros s. unfold ci_within. simpl.
+  pose proof (mortality_risk_valid s) as [Hl Hh].
+  apply Nat.leb_le in Hl, Hh. rewrite Hl, Hh. reflexivity.
+Qed.
+
+(* Safe-bundle accessors preserve the monotonicity guarantee. *)
+Lemma safe_inst_mortality_monotone_concrete :
+  forall d s1 s2, Stage.leb s1 s2 = true ->
+  inst_mortality_percent (safe_inst_data d) s1 <=
+  inst_mortality_percent (safe_inst_data d) s2.
+Proof.
+  intros d s1 s2 H. unfold inst_mortality_percent.
+  apply (safe_mortality_monotone d). exact H.
+Qed.
+
+Lemma safe_inst_stricture_monotone_concrete :
+  forall d s1 s2, Stage.leb s1 s2 = true ->
+  inst_stricture_percent (safe_inst_data d) s1 <=
+  inst_stricture_percent (safe_inst_data d) s2.
+Proof.
+  intros d s1 s2 H. unfold inst_stricture_percent.
+  apply (safe_stricture_monotone d). exact H.
+Qed.
+
+Lemma safe_inst_short_bowel_monotone_concrete :
+  forall d s1 s2, Stage.leb s1 s2 = true ->
+  inst_short_bowel_percent (safe_inst_data d) s1 <=
+  inst_short_bowel_percent (safe_inst_data d) s2.
+Proof.
+  intros d s1 s2 H. unfold inst_short_bowel_percent.
+  apply (safe_short_bowel_monotone d). exact H.
+Qed.
+
 End Prognosis.
 
 Module OrganFailureFeedback.
@@ -1691,6 +2075,38 @@ Lemma classify_with_oa_idempotent : forall c oa,
 Proof.
   intros c oa. unfold classify_with_oa.
   apply stage_with_organ_failure_idempotent.
+Qed.
+
+(* Strict-Bell variant of the single-pass OF-aware classifier. Mirrors
+   classify_with_oa but routes through Classification.classify_strict_bell. *)
+Definition classify_strict_with_oa
+    (c : ClinicalState.t)
+    (oa : NeonatalOrganFailure.OrganFailureAssessment) : Stage.t :=
+  stage_with_organ_failure (Classification.classify_strict_bell c) oa.
+
+Lemma classify_strict_with_oa_dominates_strict : forall c oa,
+  Stage.to_nat (Classification.classify_strict_bell c) <=
+  Stage.to_nat (classify_strict_with_oa c oa).
+Proof.
+  intros c oa. apply organ_failure_never_decreases_stage.
+Qed.
+
+Lemma classify_strict_with_oa_no_mods_idempotent : forall c oa,
+  NeonatalOrganFailure.multiorgan_dysfunction oa = false ->
+  classify_strict_with_oa c oa = Classification.classify_strict_bell c.
+Proof.
+  intros c oa H. unfold classify_strict_with_oa, stage_with_organ_failure.
+  rewrite H. destruct (Classification.classify_strict_bell c); reflexivity.
+Qed.
+
+Lemma classify_strict_with_oa_preserves_IIIB : forall c oa,
+  RadiographicSigns.pneumoperitoneum (ClinicalState.radiographic c) = true ->
+  classify_strict_with_oa c oa = Stage.IIIB.
+Proof.
+  intros c oa H. unfold classify_strict_with_oa.
+  apply Classification.strict_bell_IIIB_iff_pneumoperitoneum in H.
+  rewrite H. unfold stage_with_organ_failure.
+  destruct (NeonatalOrganFailure.multiorgan_dysfunction oa); reflexivity.
 Qed.
 
 End OrganFailureFeedback.

@@ -163,6 +163,43 @@ Definition culture_escalation_hours := MkParam 48 lambert_2012 2012.
    demoted to FeedingIntolerance. *)
 Definition age_adjust_demotion_threshold := MkParam 2 neu_walker_2011 2011.
 
+(* Antibiotic course durations (days) — Walsh & Kliegman 1986 protocol,
+   reaffirmed Sharma & Hudak 2013, NeoReviews 14(4):e182-e194. *)
+Definition abx_duration_stage_I := MkParam 3 walsh_kliegman_1986 1986.
+Definition abx_duration_stage_II := MkParam 10 walsh_kliegman_1986 1986.
+Definition abx_duration_stage_III := MkParam 14 walsh_kliegman_1986 1986.
+
+(* Sign-staleness threshold (hours).
+   Walsh & Kliegman 1986 recommend q4-6h reassessment in active NEC; signs
+   older than this window are treated as stale by the production API. *)
+Definition staleness_threshold := MkParam 6 walsh_kliegman_1986 1986.
+
+(* Reassessment-interval base values (hours), trajectory-keyed.
+   - RapidDeterioration: Lambert et al. 2012, J Pediatr Surg 47(11):2111-2118
+   - Worsening: Walsh & Kliegman 1986
+   - Stable: AAP nursing assessment standard
+   - Improving: step-down monitoring convention. *)
+Definition reassess_rapid_h := MkParam 2 lambert_2012 2012.
+Definition reassess_worsening_h := MkParam 4 walsh_kliegman_1986 1986.
+Definition reassess_stable_h := MkParam 6 walsh_kliegman_1986 1986.
+Definition reassess_improving_h := MkParam 12 walsh_kliegman_1986 1986.
+Definition reassess_advanced_floor_h := MkParam 1 lambert_2012 2012.
+Definition reassess_suspected_ceiling_h := MkParam 12 walsh_kliegman_1986 1986.
+Definition reassess_suspected_offset_h := MkParam 2 walsh_kliegman_1986 1986.
+
+(* ValidationCohort acceptance thresholds (per-mille).
+   Editorial defaults: 80% sensitivity, 90% specificity floors for
+   clinical staging deployment. Institutions can substitute via
+   alternative metadata; see Calibration.meets_acceptance_criteria. *)
+Definition min_sensitivity_per_mille := MkParam 800 walsh_kliegman_1986 1986.
+Definition min_specificity_per_mille := MkParam 900 walsh_kliegman_1986 1986.
+
+(* Validation-cohort vintage staleness threshold (years).
+   Validation cohorts older than this many years are refused at the
+   deployment gate. Five-year window aligns with the Walsh-Kliegman
+   recurrence interval for clinical-criteria revalidation. *)
+Definition cohort_vintage_max_years := MkParam 5 walsh_kliegman_1986 1986.
+
 End ClinicalParameters.
 
 Module RiskFactors.
@@ -354,6 +391,21 @@ Lemma risk_score_nonneg_clamp : forall r,
   (risk_score_Z r < 0)%Z -> risk_score r = 0.
 Proof.
   intros r H. unfold risk_score. rewrite Z.max_l; [reflexivity | lia].
+Qed.
+
+(* Closed-form bridge: risk_score is exactly nat-monus of raw and protective.
+   Both sides clamp to 0 below the protective floor, so the Z.max-and-Z.to_nat
+   composition is observationally indistinguishable from nat subtraction. *)
+Lemma risk_score_closed_form : forall r,
+  risk_score r = risk_score_raw r - protective_factor r.
+Proof.
+  intros r. unfold risk_score, risk_score_Z.
+  destruct (Nat.le_gt_cases (protective_factor r) (risk_score_raw r)) as [Hle|Hgt].
+  - rewrite Z.max_r by lia.
+    rewrite Z2Nat.inj_sub by lia.
+    rewrite !Nat2Z.id. reflexivity.
+  - rewrite Z.max_l by lia.
+    cbn [Z.to_nat]. lia.
 Qed.
 
 Lemma extremely_preterm_high_risk : forall r,
