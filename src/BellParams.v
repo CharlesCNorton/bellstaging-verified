@@ -1,3 +1,24 @@
+(******************************************************************************)
+(*                                                                            *)
+(*                  Bell Staging for Necrotizing Enterocolitis                *)
+(*                                                                            *)
+(*     A Rocq formalization of modified Bell staging for NEC in neonates.     *)
+(*     Stage classifiers (IA-IIIB), calibrated NEC-vs-SIP differential,       *)
+(*     organ-failure feedback, trajectory analysis, surgical indications,    *)
+(*     and FHIR serialization. API gates on input validity, sign freshness,  *)
+(*     and (for deployment) literature-validated cohort metadata. OCaml      *)
+(*     extraction; randomized property tests via QuickChick.                 *)
+(*                                                                            *)
+(*     'I will stand at my watch and station myself on the ramparts;          *)
+(*      I will look to see what he will say to me, and what answer            *)
+(*      I am to give to this complaint.' - Habakkuk 2:1                       *)
+(*                                                                            *)
+(*     Author: Charles C. Norton                                              *)
+(*     Date: May 6, 2026                                                      *)
+(*     License: MIT                                                           *)
+(*                                                                            *)
+(******************************************************************************)
+
 From Stdlib Require Import PeanoNat.
 From Stdlib Require Import Bool.
 From Stdlib Require Import List.
