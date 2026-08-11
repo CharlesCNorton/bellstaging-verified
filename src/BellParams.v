@@ -4,14 +4,14 @@
 (*                                                                            *)
 (*     A Rocq formalization of modified Bell staging for NEC in neonates.     *)
 (*     Stage classifiers (IA-IIIB), calibrated NEC-vs-SIP differential,       *)
-(*     organ-failure feedback, trajectory analysis, surgical indications,    *)
-(*     and FHIR serialization. API gates on input validity, sign freshness,  *)
-(*     and (for deployment) literature-validated cohort metadata. OCaml      *)
-(*     extraction; randomized property tests via QuickChick.                 *)
+(*     organ-failure feedback, trajectory analysis, surgical indications,     *)
+(*     and FHIR serialization. API gates on input validity, sign freshness,   *)
+(*     and (for deployment) literature-validated cohort metadata. OCaml       *)
+(*     extraction; randomized property tests via QuickChick.                  *)
 (*                                                                            *)
-(*     'I will stand at my watch and station myself on the ramparts;          *)
+(*     "I will stand at my watch and station myself on the ramparts;          *)
 (*      I will look to see what he will say to me, and what answer            *)
-(*      I am to give to this complaint.' - Habakkuk 2:1                       *)
+(*      I am to give to this complaint." - Habakkuk 2:1                       *)
 (*                                                                            *)
 (*     Author: Charles C. Norton                                              *)
 (*     Date: May 6, 2026                                                      *)
@@ -91,6 +91,7 @@ Definition berseth_2003 : nat := 14.
 Definition hay_thureen_2010 : nat := 15.
 Definition embleton_2005 : nat := 16.
 Definition lambert_2012 : nat := 17.
+Definition editorial_default : nat := 18.
 
 Definition weight_extremely_preterm := MkParam 4 neu_walker_2011 2011.
 Definition weight_very_preterm := MkParam 3 neu_walker_2011 2011.
@@ -177,12 +178,12 @@ Definition staleness_threshold := MkParam 6 walsh_kliegman_1986 1986.
 (* Reassessment-interval base values (hours), trajectory-keyed.
    - RapidDeterioration: Lambert et al. 2012, J Pediatr Surg 47(11):2111-2118
    - Worsening: Walsh & Kliegman 1986
-   - Stable: AAP nursing assessment standard
-   - Improving: step-down monitoring convention. *)
+   - Stable: editorial default
+   - Improving: editorial default. *)
 Definition reassess_rapid_h := MkParam 2 lambert_2012 2012.
 Definition reassess_worsening_h := MkParam 4 walsh_kliegman_1986 1986.
-Definition reassess_stable_h := MkParam 6 walsh_kliegman_1986 1986.
-Definition reassess_improving_h := MkParam 12 walsh_kliegman_1986 1986.
+Definition reassess_stable_h := MkParam 6 editorial_default 2026.
+Definition reassess_improving_h := MkParam 12 editorial_default 2026.
 Definition reassess_advanced_floor_h := MkParam 1 lambert_2012 2012.
 Definition reassess_suspected_ceiling_h := MkParam 12 walsh_kliegman_1986 1986.
 Definition reassess_suspected_offset_h := MkParam 2 walsh_kliegman_1986 1986.
@@ -191,14 +192,13 @@ Definition reassess_suspected_offset_h := MkParam 2 walsh_kliegman_1986 1986.
    Editorial defaults: 80% sensitivity, 90% specificity floors for
    clinical staging deployment. Institutions can substitute via
    alternative metadata; see Calibration.meets_acceptance_criteria. *)
-Definition min_sensitivity_per_mille := MkParam 800 walsh_kliegman_1986 1986.
-Definition min_specificity_per_mille := MkParam 900 walsh_kliegman_1986 1986.
+Definition min_sensitivity_per_mille := MkParam 800 editorial_default 2026.
+Definition min_specificity_per_mille := MkParam 900 editorial_default 2026.
 
 (* Validation-cohort vintage staleness threshold (years).
    Validation cohorts older than this many years are refused at the
-   deployment gate. Five-year window aligns with the Walsh-Kliegman
-   recurrence interval for clinical-criteria revalidation. *)
-Definition cohort_vintage_max_years := MkParam 5 walsh_kliegman_1986 1986.
+   deployment gate. The five-year window is an editorial default. *)
+Definition cohort_vintage_max_years := MkParam 5 editorial_default 2026.
 
 End ClinicalParameters.
 
